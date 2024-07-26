@@ -53,9 +53,9 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn write_bstr(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        let performer = &mut Performer::new(&mut self.inner);
-        for byte in bstr {
-            self.parser.advance(performer, *byte);
+        let mut performer = Performer::new(&mut self.inner);
+        for &byte in bstr {
+            self.parser.advance(&mut performer, byte);
         }
         self.inner.cursor_handler(true);
     }

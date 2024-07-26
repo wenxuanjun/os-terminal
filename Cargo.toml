@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -34,7 +34,6 @@ default-features = false
 
 [dev-dependencies]
 minifb = "0.27.0"
-env_logger = "0.11.4"
 crossbeam-channel = "0.5.13"
 
 [dev-dependencies.nix]

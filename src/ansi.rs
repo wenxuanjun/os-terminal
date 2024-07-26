@@ -2,6 +2,7 @@ use vte::{Params, ParamsIter, Perform};
 
 use super::cell::Cell;
 use super::color::{Color, NamedColor};
+use super::log::log;
 
 #[derive(Debug)]
 pub enum LineClearMode {
@@ -68,7 +69,7 @@ pub enum CursorShape {
 
 impl Default for CursorShape {
     fn default() -> CursorShape {
-        CursorShape::Beam
+        CursorShape::Block
     }
 }
 
@@ -93,7 +94,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             b'\x09' => self.handler.put_tab(),
             b'\x0A' => self.handler.linefeed(),
             b'\x0D' => self.handler.carriage_return(),
-            _ => crate::log!("Unhandled execute byte={:02x}", byte),
+            _ => log!("Unhandled execute byte={:02x}", byte),
         }
     }
 
@@ -103,9 +104,9 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
         }
 
         match params[0] {
-            b"0" | b"2" => crate::log!("Set window title"),
-            b"4" => crate::log!("Set color index"),
-            b"10" | b"11" | b"12" => crate::log!("Get/set Foreground, Background, Cursor colors"),
+            b"0" | b"2" => log!("Set window title"),
+            b"4" => log!("Set color index"),
+            b"10" | b"11" | b"12" => log!("Get/set Foreground, Background, Cursor colors"),
             b"50" => {
                 if params.len() >= 2
                     && params[1].len() >= 13
@@ -116,19 +117,19 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                         '1' => CursorShape::Beam,
                         '2' => CursorShape::Underline,
                         _ => {
-                            crate::log!("Invalid cursor shape: {:?}", params[1]);
-                            return
+                            log!("Invalid cursor shape: {:?}", params[1]);
+                            return;
                         }
                     };
                     self.handler.set_cursor_shape(shape);
                 }
-            },
-            b"52" => crate::log!("Set clipboard"),
-            b"104" => crate::log!("Reset color index"),
-            b"110" => crate::log!("Reset foreground color"),
-            b"111" => crate::log!("Reset background color"),
-            b"112" => crate::log!("Reset text cursor color"),
-            _ => crate::log!("Unhandled osc_dispatch: [{:?}]", params)
+            }
+            b"52" => log!("Set clipboard"),
+            b"104" => log!("Reset color index"),
+            b"110" => log!("Reset foreground color"),
+            b"111" => log!("Reset background color"),
+            b"112" => log!("Reset text cursor color"),
+            _ => log!("Unhandled osc_dispatch: [{:?}]", params),
         }
     }
 
@@ -168,7 +169,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     2 => ScreenClearMode::All,
                     3 => ScreenClearMode::Saved,
                     _ => {
-                        crate::log!("Invalid clear screen mode: {:?}", params);
+                        log!("Invalid clear screen mode: {:?}", params);
                         return;
                     }
                 };
@@ -180,7 +181,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     1 => LineClearMode::Left,
                     2 => LineClearMode::All,
                     _ => {
-                        crate::log!("Invalid clear line mode: {:?}", params);
+                        log!("Invalid clear line mode: {:?}", params);
                         return;
                     }
                 };
@@ -195,12 +196,13 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     3 | 4 => Some(CursorShape::Underline),
                     5 | 6 => Some(CursorShape::Beam),
                     _ => {
-                        crate::log!("Invalid cursor style: {:?}", cursor_style_id);
+                        log!("Invalid cursor style: {:?}", cursor_style_id);
                         return;
                     }
                 };
-                self.handler.set_cursor_shape(shape.unwrap_or(CursorShape::default()));
-            },
+                self.handler
+                    .set_cursor_shape(shape.unwrap_or(CursorShape::default()));
+            }
             ('X', []) => self.handler.erase_chars(extract_one_param(params, 1)),
             ('d', []) => self.handler.goto_line(extract_one_param(params, 1) - 1),
             ('m', _) => {
@@ -219,7 +221,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
     fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
         macro_rules! configure_charset {
             ($intermediates:expr) => {
-                crate::log!("Unhandled charset: {:?}", $intermediates)
+                log!("Unhandled charset: {:?}", $intermediates)
             };
         }
 
@@ -227,7 +229,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             (b'7', []) => self.handler.save_cursor_position(),
             (b'8', []) => self.handler.restore_cursor_position(),
             (b'B', intermediates) => configure_charset!(intermediates),
-            _ => crate::log!("Unhandled escape code: ESC {:?} {byte}", intermediates),
+            _ => log!("Unhandled escape code: ESC {:?} {byte}", intermediates),
         }
     }
 }
@@ -303,7 +305,7 @@ fn attrs_from_sgr_parameters<F: FnMut(Attr)>(
             [100..=107] => terminal_attribute_handler(Attr::Background(Color::Indexed(
                 param[0] as u8 - 100 + NamedColor::BrightBlack as u8,
             ))),
-            _ => crate::log!("Unhandled sgr parameter: {:?}", param),
+            _ => log!("Unhandled sgr parameter: {:?}", param),
         };
     }
 }

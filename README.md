@@ -9,6 +9,7 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 - Embedded smooth noto font rendering
 - VT100 and part of xterm escape sequence support
 - Beautiful color scheme
+- Cursor display and shape control
 
 ## Usage
 
@@ -39,6 +40,12 @@ Then you can create a terminal and write to it.
 let mut terminal = Terminal::new(display);
 terminal.write_bstr(b"Hello, world!");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
+```
+
+If you want to get the logs of the terminal, you can set a logger that receives `fmt::Arguments`.
+
+```rust
+os_terminal::set_logger(|arg| println!("Terminal: {:?}", arg));
 ```
 
 ## Acknowledgement

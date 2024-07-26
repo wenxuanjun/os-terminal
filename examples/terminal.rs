@@ -89,8 +89,6 @@ impl DrawTarget for Display {
 }
 
 fn main() {
-    env_logger::init();
-
     let buffer = vec![0; DISPLAY_SIZE.0 * DISPLAY_SIZE.1];
     let buffer = Arc::new(Mutex::new(buffer));
 
