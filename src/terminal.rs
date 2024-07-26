@@ -13,28 +13,28 @@ struct Cursor {
     shape: CursorShape,
 }
 
-pub struct Console<D: DrawTarget> {
+pub struct Terminal<D: DrawTarget> {
     parser: vte::Parser,
-    inner: ConsoleInner<D>,
+    inner: TerminalInner<D>,
 }
 
-pub struct ConsoleInner<D: DrawTarget> {
+pub struct TerminalInner<D: DrawTarget> {
     cursor: Cursor,
     saved_cursor: Cursor,
     attribute_template: Cell,
     buffer: TerminalBuffer<D>,
 }
 
-impl<D: DrawTarget> Console<D> {
+impl<D: DrawTarget> Terminal<D> {
     pub fn new(buffer: D) -> Self {
         let (width, height) = buffer.size();
 
         let mut graphic = TextOnGraphic::new(buffer, width, height);
         graphic.clear(Cell::default());
 
-        Console {
+        Terminal {
             parser: vte::Parser::new(),
-            inner: ConsoleInner {
+            inner: TerminalInner {
                 cursor: Cursor::default(),
                 saved_cursor: Cursor::default(),
                 attribute_template: Cell::default(),
@@ -61,14 +61,14 @@ impl<D: DrawTarget> Console<D> {
     }
 }
 
-impl<D: DrawTarget> fmt::Write for Console<D> {
+impl<D: DrawTarget> fmt::Write for Terminal<D> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.write_bstr(s.as_bytes());
         Ok(())
     }
 }
 
-impl<D: DrawTarget> ConsoleInner<D> {
+impl<D: DrawTarget> TerminalInner<D> {
     fn cursor_handler(&mut self, enable: bool) {
         let (row, column) = (self.cursor.row, self.cursor.column);
         if column < self.buffer.width() && row < self.buffer.height() {
@@ -90,7 +90,7 @@ impl<D: DrawTarget> ConsoleInner<D> {
     }
 }
 
-impl<D: DrawTarget> Handler for ConsoleInner<D> {
+impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn input(&mut self, content: char) {
         if self.cursor.column >= self.buffer.width() {
             self.cursor.column = 0;

@@ -2,6 +2,8 @@
 
 A `no_std` terminal library for embedded systems and OS kernels.
 
+The environment should have initialized `global_allocator` since `alloc` crate is used for dynamic memory allocation.
+
 ## Features
 
 - Embedded smooth noto font rendering
@@ -31,12 +33,12 @@ impl DrawTarget for Display {
 }
 ```
 
-Then you can create a console and write to it.
+Then you can create a terminal and write to it.
 
 ```rust
-let mut console = Console::new(display);
-console.write_bstr(b"Hello, world!");
-console.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
+let mut terminal = Terminal::new(display);
+terminal.write_bstr(b"Hello, world!");
+terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
 ## Acknowledgement

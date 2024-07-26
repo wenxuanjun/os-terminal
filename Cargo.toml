@@ -1,14 +1,14 @@
 [package]
 name = "os-terminal"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
 keywords = ["terminal", "console", "os", "no-std"]
 categories = ["embedded", "gui", "no-std"]
 license = "MIT"
-homepage = "https://github.com/rcore-os/embedded-term"
-repository = "https://github.com/rcore-os/embedded-term"
+homepage = "https://github.com/wenxuanjun/os-terminal"
+repository = "https://github.com/wenxuanjun/os-terminal"
 
 [profile.release]
 lto = true

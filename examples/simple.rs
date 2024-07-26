@@ -1,4 +1,4 @@
-use os_terminal::{Console, DrawTarget};
+use os_terminal::{Terminal, DrawTarget};
 use minifb::{Key, Window, WindowOptions};
 
 use std::io::Read;
@@ -44,7 +44,7 @@ fn main() {
         WindowOptions::default(),
     ).unwrap();
 
-    let mut console = Console::new(display);
+    let mut terminal = Terminal::new(display);
 
     std::thread::spawn(move || {
         for c in std::io::stdin().lock().bytes() {
@@ -52,7 +52,7 @@ fn main() {
             if c == 0xff {
                 break;
             }
-            console.write_bstr(&[c]);
+            terminal.write_bstr(&[c]);
         }
     });
 

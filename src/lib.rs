@@ -4,12 +4,12 @@ mod ansi;
 mod buffer;
 mod cell;
 mod color;
-mod console;
+mod terminal;
 mod graphic;
 mod log;
 
 extern crate alloc;
 
-pub use console::Console;
+pub use terminal::Terminal;
 pub use graphic::DrawTarget;
 pub use log::set_logger;

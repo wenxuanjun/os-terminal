@@ -5,7 +5,7 @@ use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::termios;
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
-use os_terminal::{Console, DrawTarget};
+use os_terminal::{Terminal, DrawTarget};
 
 use std::ffi::CString;
 use std::os::fd::AsFd;
@@ -112,7 +112,7 @@ fn main() {
     let keyboard_handler = KeyboardHandler::new(key_sender);
     window.set_input_callback(Box::new(keyboard_handler));
 
-    let mut console = Console::new(display);
+    let mut terminal = Terminal::new(display);
     os_terminal::set_logger(|arg| println!("Terminal: {:?}", arg));
 
     // Create a PTY
@@ -124,8 +124,8 @@ fn main() {
             close(master.as_raw_fd()).unwrap();
 
             let win_size = Winsize {
-                ws_row: console.rows() as u16,
-                ws_col: console.columns() as u16,
+                ws_row: terminal.rows() as u16,
+                ws_col: terminal.columns() as u16,
                 ws_xpixel: DISPLAY_SIZE.0 as u16,
                 ws_ypixel: DISPLAY_SIZE.1 as u16,
             };
@@ -155,7 +155,7 @@ fn main() {
                 loop {
                     match read(master_raw_fd, &mut temp) {
                         Ok(n) if n > 0 => {
-                            console.write_bstr(&temp[..n]);
+                            terminal.write_bstr(&temp[..n]);
                         }
                         Ok(_) => break,
                         Err(Errno::EIO) => process::exit(0),
