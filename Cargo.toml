@@ -1,0 +1,35 @@
+[package]
+name = "os-terminal"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = true
+opt-level = "z"
+# strip = "symbols"
+codegen-units = 1
+
+[dependencies]
+vte = "0.13.0"
+bitflags = "2.6.0"
+spin = "0.9.8"
+
+[dependencies.noto-sans-mono-bitmap]
+version = "0.3.0"
+features = [
+    "regular",
+    "bold",
+    "size_20",
+    "unicode-basic-latin",
+    "unicode-specials",
+]
+default-features = false
+
+[dev-dependencies]
+minifb = "0.27.0"
+env_logger = "0.11.4"
+crossbeam-channel = "0.5.13"
+
+[dev-dependencies.nix]
+version = "0.29.0"
+features = ["term", "process", "fs"]
