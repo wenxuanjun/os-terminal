@@ -35,8 +35,8 @@ Then you can create a console and write to it.
 
 ```rust
 let mut console = Console::new(display);
-console.write_fmt(format_args!("Hello, world"));
-console.write_byte(b'!');
+console.write_bstr(b"Hello, world!");
+console.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
 ## Acknowledgement
