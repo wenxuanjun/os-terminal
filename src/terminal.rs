@@ -26,10 +26,8 @@ pub struct TerminalInner<D: DrawTarget> {
 }
 
 impl<D: DrawTarget> Terminal<D> {
-    pub fn new(buffer: D) -> Self {
-        let (width, height) = buffer.size();
-
-        let mut graphic = TextOnGraphic::new(buffer, width, height);
+    pub fn new(display: D) -> Self {
+        let mut graphic = TextOnGraphic::new(display);
         graphic.clear(Cell::default());
 
         Terminal {

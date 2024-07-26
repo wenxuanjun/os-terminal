@@ -15,6 +15,8 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 
 Create a display wrapper to wrap your framebuffer and implement the `DrawTarget` trait for it.
 
+The sequence of color tuple in `draw_pixel` is `(r, g, b)`.
+
 ```rust
 struct Display {
     width: usize,
@@ -38,14 +40,14 @@ Then you can create a terminal and write to it.
 
 ```rust
 let mut terminal = Terminal::new(display);
-terminal.write_bstr(b"Hello, world!");
+terminal.write_bstr(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
-If you want to get the logs of the terminal, you can set a logger that receives `fmt::Arguments`.
+If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
 ```rust
-os_terminal::set_logger(|arg| println!("Terminal: {:?}", arg));
+os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
 ```
 
 ## Acknowledgement

@@ -5,13 +5,14 @@ use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::termios;
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
-use os_terminal::{Terminal, DrawTarget};
+use os_terminal::{DrawTarget, Terminal};
 
 use std::ffi::CString;
 use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::process;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
@@ -73,7 +74,7 @@ impl InputCallback for KeyboardHandler {
 struct Display {
     width: usize,
     height: usize,
-    buffer: Arc<Mutex<Vec<u32>>>,
+    buffer: Arc<Vec<AtomicU32>>,
 }
 
 impl DrawTarget for Display {
@@ -83,14 +84,15 @@ impl DrawTarget for Display {
 
     fn draw_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
-        let mut buffer = self.buffer.lock().unwrap();
-        buffer[y * self.width + x] = value;
+        self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
     }
 }
 
 fn main() {
-    let buffer = vec![0; DISPLAY_SIZE.0 * DISPLAY_SIZE.1];
-    let buffer = Arc::new(Mutex::new(buffer));
+    let buffer = (0..DISPLAY_SIZE.0 * DISPLAY_SIZE.1)
+        .map(|_| AtomicU32::new(0))
+        .collect::<Vec<_>>();
+    let buffer = Arc::new(buffer);
 
     let display = Display {
         width: DISPLAY_SIZE.0,
@@ -111,7 +113,7 @@ fn main() {
     window.set_input_callback(Box::new(keyboard_handler));
 
     let mut terminal = Terminal::new(display);
-    os_terminal::set_logger(|arg| println!("Terminal: {:?}", arg));
+    os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
 
     // Create a PTY
     let OpenptyResult { master, slave } = openpty(None, None).unwrap();
@@ -173,7 +175,10 @@ fn main() {
 
             while window.is_open() {
                 {
-                    let buffer = buffer.lock().unwrap();
+                    let buffer = buffer
+                        .iter()
+                        .map(|pixel| pixel.load(Ordering::Relaxed))
+                        .collect::<Vec<_>>();
                     window
                         .update_with_buffer(&buffer, DISPLAY_SIZE.0, DISPLAY_SIZE.1)
                         .unwrap();

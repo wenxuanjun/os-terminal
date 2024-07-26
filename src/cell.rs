@@ -16,9 +16,9 @@ bitflags::bitflags! {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cell {
     pub content: char,
+    pub flags: Flags,
     pub foreground: Color,
     pub background: Color,
-    pub flags: Flags,
 }
 
 impl Cell {
@@ -38,9 +38,9 @@ impl Default for Cell {
     fn default() -> Cell {
         Cell {
             content: ' ',
+            flags: Flags::empty(),
             foreground: Color::Indexed(NamedColor::BrightWhite as u8),
             background: Color::Indexed(NamedColor::Black as u8),
-            flags: Flags::empty(),
         }
     }
 }
