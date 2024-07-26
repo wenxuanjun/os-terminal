@@ -47,8 +47,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
                 if last != current {
                     self.write(i - 1, j, current);
                 }
-                self.write(i - 1, j, current);
-
             }
         }
         for j in 0..self.width() {
