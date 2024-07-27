@@ -4,6 +4,12 @@ A `no_std` terminal library for embedded systems and OS kernels.
 
 The environment should have initialized `global_allocator` since `alloc` crate is used for dynamic memory allocation.
 
+## Screenshot
+
+![](screenshot.png)
+
+This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --example terminal` (Linux only). It will execute `bash` by default.
+
 ## Features
 
 - Embedded smooth noto font rendering
