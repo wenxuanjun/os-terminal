@@ -4,22 +4,23 @@ use noto_sans_mono_bitmap::{get_raster, get_raster_width};
 use noto_sans_mono_bitmap::{FontWeight, RasterHeight};
 
 use super::cell::{Cell, Flags};
+use super::color::Rgb888;
 
 const FONT_WIDTH: usize = get_raster_width(FontWeight::Regular, FONT_HEIGHT);
 const FONT_HEIGHT: RasterHeight = RasterHeight::Size20;
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
-    fn draw_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8));
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888);
 }
 
-type BgFgPair = ((u8, u8, u8), (u8, u8, u8));
+type FgBgPair = (Rgb888, Rgb888);
 
 pub struct TextOnGraphic<D: DrawTarget> {
     width: usize,
     height: usize,
     graphic: D,
-    color_cache: BTreeMap<BgFgPair, ColorCache>,
+    color_cache: BTreeMap<FgBgPair, ColorCache>,
 }
 
 impl<D: DrawTarget> TextOnGraphic<D> {
@@ -83,67 +84,53 @@ impl<D: DrawTarget> TextOnGraphic<D> {
 
         let color_cache = self
             .color_cache
-            .entry((background, foreground))
+            .entry((foreground, background))
             .or_insert_with(|| ColorCache::new(foreground, background));
 
-        let mut draw_pixel = |x: usize, y: usize, intensity: u8| {
-            let r = color_cache.r_cache[intensity as usize];
-            let g = color_cache.g_cache[intensity as usize];
-            let b = color_cache.b_cache[intensity as usize];
-
-            self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
-        };
-
         for (y, lines) in char_raster.raster().iter().enumerate() {
-            for (x, intensity) in lines.iter().enumerate() {
-                draw_pixel(x, y, *intensity);
+            for (x, &intensity) in lines.iter().enumerate() {
+                let (r, g, b) = color_cache.colors[intensity as usize];
+                self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
             }
         }
 
         if cell.flags.contains(Flags::CURSOR_BEAM) {
             for y in 0..FONT_HEIGHT as usize {
-                draw_pixel(0, y, 0xff);
+                let (r, g, b) = color_cache.colors[0xff as usize];
+                self.graphic.draw_pixel(x_start, y_start + y, (r, g, b));
             }
         }
 
         if cell.flags.contains(Flags::UNDERLINE) || cell.flags.contains(Flags::CURSOR_UNDERLINE) {
             for x in 0..FONT_WIDTH {
-                draw_pixel(x, FONT_HEIGHT as usize - 1, 0xff);
+                let (r, g, b) = color_cache.colors[0xff as usize];
+                self.graphic
+                    .draw_pixel(x_start + x, y_start + FONT_HEIGHT as usize - 1, (r, g, b));
             }
         }
     }
 }
 
 struct ColorCache {
-    r_cache: [u8; 256],
-    g_cache: [u8; 256],
-    b_cache: [u8; 256],
+    colors: [Rgb888; 256],
 }
 
 impl ColorCache {
-    fn new(foreground: (u8, u8, u8), background: (u8, u8, u8)) -> Self {
+    fn new(foreground: Rgb888, background: Rgb888) -> Self {
         let r_diff = foreground.0 as i32 - background.0 as i32;
         let g_diff = foreground.1 as i32 - background.1 as i32;
         let b_diff = foreground.2 as i32 - background.2 as i32;
 
-        let mut r_cache = [0u8; 256];
-        let mut g_cache = [0u8; 256];
-        let mut b_cache = [0u8; 256];
+        let mut colors = [(0u8, 0u8, 0u8); 256];
 
         for intensity in 0..256 {
             let weight = intensity as i32;
-            r_cache[intensity] =
-                ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            g_cache[intensity] =
-                ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            b_cache[intensity] =
-                ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            let r = ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            let g = ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            let b = ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            colors[intensity] = (r, g, b);
         }
 
-        ColorCache {
-            r_cache,
-            g_cache,
-            b_cache,
-        }
+        ColorCache { colors }
     }
 }

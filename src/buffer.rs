@@ -16,23 +16,28 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
     }
 
+    #[inline]
     pub fn width(&self) -> usize {
         self.inner.width()
     }
 
+    #[inline]
     pub fn height(&self) -> usize {
         self.inner.height()
     }
 
+    #[inline]
     pub fn clear(&mut self, cell: Cell) {
         self.inner.clear(cell);
     }
 
+    #[inline]
     pub fn read(&self, row: usize, col: usize) -> Cell {
         let row = row % self.inner.height();
         self.buffer[row][col]
     }
 
+    #[inline]
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
         let row = row % self.inner.height();
         self.buffer[row][col] = cell;
@@ -40,15 +45,21 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn new_line(&mut self, cell: Cell) {
+        let mut prev_row = Vec::with_capacity(self.width());
+        for j in 0..self.width() {
+            prev_row.push(self.read(0, j));
+        }
+
         for i in 1..self.height() {
             for j in 0..self.width() {
-                let last = self.read(i - 1, j);
                 let current = self.read(i, j);
-                if last != current {
+                if prev_row[j] != current {
                     self.write(i - 1, j, current);
                 }
+                prev_row[j] = current;
             }
         }
+
         for j in 0..self.width() {
             let current = self.read(self.height() - 1, j);
             if current != cell {

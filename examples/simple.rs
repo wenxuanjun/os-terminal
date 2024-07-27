@@ -1,16 +1,17 @@
-use os_terminal::{Terminal, DrawTarget};
 use minifb::{Key, Window, WindowOptions};
+use os_terminal::{DrawTarget, Rgb888, Terminal};
 
 use std::io::Read;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use std::sync::{Arc, RwLock};
 
 const DISPLAY_SIZE: (usize, usize) = (800, 600);
 
 struct Display {
     pub width: usize,
     pub height: usize,
-    pub buffer: Arc<RwLock<Vec<u32>>>,
+    buffer: Arc<Vec<AtomicU32>>,
 }
 
 impl DrawTarget for Display {
@@ -18,16 +19,18 @@ impl DrawTarget for Display {
         (self.width, self.height)
     }
 
-    fn draw_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
+    #[inline]
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
-        let mut buffer = self.buffer.write().unwrap();
-        buffer[y * self.width + x] = value;
+        self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
     }
 }
 
 fn main() {
-    let buffer = vec![0; DISPLAY_SIZE.0 * DISPLAY_SIZE.1];
-    let buffer = Arc::new(RwLock::new(buffer));
+    let buffer = (0..DISPLAY_SIZE.0 * DISPLAY_SIZE.1)
+        .map(|_| AtomicU32::new(0))
+        .collect::<Vec<_>>();
+    let buffer = Arc::new(buffer);
 
     let display = Display {
         width: DISPLAY_SIZE.0,
@@ -40,7 +43,8 @@ fn main() {
         DISPLAY_SIZE.0,
         DISPLAY_SIZE.1,
         WindowOptions::default(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut terminal = Terminal::new(display);
 
@@ -56,8 +60,13 @@ fn main() {
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         {
-            let buffer = buffer.read().unwrap();
-            window.update_with_buffer(&buffer, DISPLAY_SIZE.0, DISPLAY_SIZE.1).unwrap();
+            let buffer = buffer
+                .iter()
+                .map(|pixel| pixel.load(Ordering::Relaxed))
+                .collect::<Vec<_>>();
+            window
+                .update_with_buffer(&buffer, DISPLAY_SIZE.0, DISPLAY_SIZE.1)
+                .unwrap();
         }
         std::thread::sleep(Duration::from_millis(20));
     }

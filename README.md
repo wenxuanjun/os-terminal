@@ -15,9 +15,9 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 
 Create a display wrapper to wrap your framebuffer and implement the `DrawTarget` trait for it.
 
-The sequence of color tuple in `draw_pixel` is `(r, g, b)`.
-
 ```rust
+use os_terminal::{DrawTarget, Rgb888, Terminal};
+
 struct Display {
     width: usize,
     height: usize,
@@ -29,7 +29,7 @@ impl DrawTarget for Display {
         (self.width, self.height)
     }
 
-    fn draw_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
         self.buffer[y * self.width + x] = value;
     }

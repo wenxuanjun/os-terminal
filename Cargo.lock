@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "os-terminal"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "bitflags 2.6.0",
  "crossbeam-channel",

@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.2.1"
+version = "0.2.3"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -13,7 +13,6 @@ repository = "https://github.com/wenxuanjun/os-terminal"
 [profile.release]
 lto = true
 opt-level = "z"
-strip = "symbols"
 codegen-units = 1
 
 [dependencies]

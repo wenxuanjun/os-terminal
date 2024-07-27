@@ -21,14 +21,16 @@ pub enum NamedColor {
     BrightWhite,
 }
 
+pub type Rgb888 = (u8, u8, u8);
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color {
     Indexed(u8),
-    Rgb((u8, u8, u8)),
+    Rgb(Rgb888),
 }
 
 impl Color {
-    pub fn to_rgb(self) -> (u8, u8, u8) {
+    pub fn to_rgb(self) -> Rgb888 {
         match self {
             Color::Rgb(rgb) => rgb,
             Color::Indexed(idx) => COLOR_SCHEME[idx as usize],
@@ -36,7 +38,7 @@ impl Color {
     }
 }
 
-static COLOR_SCHEME: Lazy<[(u8, u8, u8); 256]> = Lazy::new(|| {
+static COLOR_SCHEME: Lazy<[Rgb888; 256]> = Lazy::new(|| {
     let mut colors = [(0, 0, 0); 256];
     colors[NamedColor::Black as usize] = (0x15, 0x15, 0x15);
     colors[NamedColor::Red as usize] = (0xac, 0x41, 0x42);

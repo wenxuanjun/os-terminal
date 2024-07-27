@@ -5,7 +5,7 @@ use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::termios;
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
-use os_terminal::{DrawTarget, Terminal};
+use os_terminal::{DrawTarget, Rgb888, Terminal};
 
 use std::ffi::CString;
 use std::os::fd::AsFd;
@@ -82,7 +82,8 @@ impl DrawTarget for Display {
         (self.width, self.height)
     }
 
-    fn draw_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
+    #[inline]
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
         self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
     }
@@ -115,7 +116,6 @@ fn main() {
     let mut terminal = Terminal::new(display);
     os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
 
-    // Create a PTY
     let OpenptyResult { master, slave } = openpty(None, None).unwrap();
 
     match unsafe { fork() } {
