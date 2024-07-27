@@ -28,6 +28,9 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
     #[inline]
     pub fn clear(&mut self, cell: Cell) {
+        self.buffer
+            .iter_mut()
+            .for_each(|row| row.iter_mut().for_each(|c| *c = cell));
         self.inner.clear(cell);
     }
 

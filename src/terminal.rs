@@ -68,23 +68,23 @@ impl<D: DrawTarget> fmt::Write for Terminal<D> {
 
 impl<D: DrawTarget> TerminalInner<D> {
     fn cursor_handler(&mut self, enable: bool) {
-        let (row, column) = (self.cursor.row, self.cursor.column);
-        if column < self.buffer.width() && row < self.buffer.height() {
-            let mut origin_cell = self.buffer.read(row, column);
+        let row = self.cursor.row % self.buffer.height();
+        let column = self.cursor.column % self.buffer.width();
 
-            let flag = match self.cursor.shape {
-                CursorShape::Block => Flags::CURSOR_BLOCK,
-                CursorShape::Underline => Flags::CURSOR_UNDERLINE,
-                CursorShape::Beam => Flags::CURSOR_BEAM,
-            };
+        let mut origin_cell = self.buffer.read(row, column);
 
-            if enable {
-                origin_cell.flags.insert(flag);
-            } else {
-                origin_cell.flags.remove(flag);
-            }
-            self.buffer.write(row, column, origin_cell);
+        let flag = match self.cursor.shape {
+            CursorShape::Block => Flags::CURSOR_BLOCK,
+            CursorShape::Underline => Flags::CURSOR_UNDERLINE,
+            CursorShape::Beam => Flags::CURSOR_BEAM,
+        };
+
+        if enable {
+            origin_cell.flags.insert(flag);
+        } else {
+            origin_cell.flags.remove(flag);
         }
+        self.buffer.write(row, column, origin_cell);
     }
 }
 

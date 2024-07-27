@@ -82,7 +82,7 @@ impl DrawTarget for Display {
         (self.width, self.height)
     }
 
-    #[inline]
+    #[inline(always)]
     fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
         self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
