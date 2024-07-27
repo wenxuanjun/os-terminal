@@ -1,7 +1,8 @@
-use super::cell::Cell;
-use super::graphic::{DrawTarget, TextOnGraphic};
 use alloc::vec;
 use alloc::vec::Vec;
+
+use super::cell::Cell;
+use super::graphic::{DrawTarget, TextOnGraphic};
 
 pub struct TerminalBuffer<D: DrawTarget> {
     buffer: Vec<Vec<Cell>>,
@@ -48,10 +49,9 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn new_line(&mut self, cell: Cell) {
-        let mut prev_row = Vec::with_capacity(self.width());
-        for j in 0..self.width() {
-            prev_row.push(self.read(0, j));
-        }
+        let mut prev_row = (0..self.width())
+            .map(|j| self.read(0, j))
+            .collect::<Vec<_>>();
 
         for i in 1..self.height() {
             for j in 0..self.width() {

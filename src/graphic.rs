@@ -7,7 +7,7 @@ use super::cell::{Cell, Flags};
 use super::color::Rgb888;
 
 const FONT_WIDTH: usize = get_raster_width(FontWeight::Regular, FONT_HEIGHT);
-const FONT_HEIGHT: RasterHeight = RasterHeight::Size20;
+const FONT_HEIGHT: RasterHeight = RasterHeight::Size16;
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);

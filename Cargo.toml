@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -9,6 +9,7 @@ categories = ["embedded", "gui", "no-std"]
 license = "MIT"
 homepage = "https://github.com/wenxuanjun/os-terminal"
 repository = "https://github.com/wenxuanjun/os-terminal"
+exclude = ["screenshot.png"]
 
 [profile.release]
 lto = true
@@ -25,7 +26,7 @@ version = "0.3.0"
 features = [
     "regular",
     "bold",
-    "size_20",
+    "size_16",
     "unicode-basic-latin",
     "unicode-specials",
 ]
