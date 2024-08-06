@@ -2,7 +2,6 @@ use vte::{Params, ParamsIter, Perform};
 
 use super::cell::Cell;
 use super::color::{Color, NamedColor};
-use super::log::log;
 
 #[derive(Debug)]
 pub enum LineClearMode {

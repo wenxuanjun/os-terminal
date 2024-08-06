@@ -5,6 +5,7 @@ use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::termios;
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
+use os_terminal::font::BitmapFont;
 use os_terminal::{DrawTarget, Rgb888, Terminal};
 
 use std::ffi::CString;
@@ -12,8 +13,7 @@ use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
 
@@ -113,8 +113,14 @@ fn main() {
     let keyboard_handler = KeyboardHandler::new(key_sender);
     window.set_input_callback(Box::new(keyboard_handler));
 
-    let mut terminal = Terminal::new(display);
-    os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
+    let terminal = {
+        let mut terminal = Terminal::new(display);
+        terminal.set_auto_flush(false);
+        terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
+        terminal.set_font_manager(Box::new(BitmapFont));
+
+        Arc::new(Mutex::new(terminal))
+    };
 
     let OpenptyResult { master, slave } = openpty(None, None).unwrap();
 
@@ -123,11 +129,14 @@ fn main() {
             // In the child process, we execute bash
             close(master.as_raw_fd()).unwrap();
 
-            let win_size = Winsize {
-                ws_row: terminal.rows() as u16,
-                ws_col: terminal.columns() as u16,
-                ws_xpixel: DISPLAY_SIZE.0 as u16,
-                ws_ypixel: DISPLAY_SIZE.1 as u16,
+            let win_size = {
+                let terminal = terminal.lock().unwrap();
+                Winsize {
+                    ws_row: terminal.rows() as u16,
+                    ws_col: terminal.columns() as u16,
+                    ws_xpixel: DISPLAY_SIZE.0 as u16,
+                    ws_ypixel: DISPLAY_SIZE.1 as u16,
+                }
             };
 
             setsid().unwrap();
@@ -149,13 +158,14 @@ fn main() {
             // In the parent process, we handle the terminal I/O
             close(slave.as_raw_fd()).unwrap();
             let master_raw_fd = master.as_raw_fd();
+            let terminal_clone = terminal.clone();
 
             std::thread::spawn(move || {
                 let mut temp = [0u8; 1024];
                 loop {
                     match read(master_raw_fd, &mut temp) {
                         Ok(n) if n > 0 => {
-                            terminal.write_bstr(&temp[..n]);
+                            terminal_clone.lock().unwrap().write_bstr(&temp[..n]);
                         }
                         Ok(_) => break,
                         Err(Errno::EIO) => process::exit(0),
@@ -179,12 +189,11 @@ fn main() {
                         .iter()
                         .map(|pixel| pixel.load(Ordering::Relaxed))
                         .collect::<Vec<_>>();
+                    terminal.lock().unwrap().flush();
                     window
                         .update_with_buffer(&buffer, DISPLAY_SIZE.0, DISPLAY_SIZE.1)
                         .unwrap();
                 }
-
-                std::thread::sleep(Duration::from_millis(10));
             }
         }
         Err(_) => eprintln!("Fork failed"),

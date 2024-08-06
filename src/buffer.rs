@@ -1,30 +1,76 @@
-use alloc::vec;
+use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 
 use super::cell::Cell;
+use super::config::CONFIG;
 use super::graphic::{DrawTarget, TextOnGraphic};
 
+const DEFAULT_SIZE: (usize, usize) = (1, 1);
+
 pub struct TerminalBuffer<D: DrawTarget> {
-    buffer: Vec<Vec<Cell>>,
-    inner: TextOnGraphic<D>,
+    graphic: TextOnGraphic<D>,
+    size: (usize, usize),
+    flush_cache: VecDeque<Vec<Cell>>,
+    buffer: VecDeque<Vec<Cell>>,
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn new(inner: TextOnGraphic<D>) -> Self {
-        TerminalBuffer {
-            buffer: vec![vec![Cell::default(); inner.width()]; inner.height()],
-            inner,
-        }
-    }
-
     #[inline]
     pub fn width(&self) -> usize {
-        self.inner.width()
+        self.size.0
     }
 
     #[inline]
     pub fn height(&self) -> usize {
-        self.inner.height()
+        self.size.1
+    }
+}
+
+impl<D: DrawTarget> TerminalBuffer<D> {
+    pub fn new(graphic: TextOnGraphic<D>) -> Self {
+        let buffer = VecDeque::from(vec![vec![Cell::default(); DEFAULT_SIZE.0]; DEFAULT_SIZE.1]);
+
+        TerminalBuffer {
+            graphic,
+            size: DEFAULT_SIZE,
+            buffer: buffer.clone(),
+            flush_cache: buffer,
+        }
+    }
+
+    pub fn update_size(&mut self, font_width: usize, font_height: usize) {
+        let (old_width, old_height) = self.size;
+
+        let width = self.graphic.width() / font_width;
+        let height = self.graphic.height() / font_height;
+
+        if width == old_width && height == old_height {
+            return;
+        }
+
+        let buffer = VecDeque::from(vec![vec![Cell::default(); width]; height]);
+
+        self.size = (width, height);
+        self.buffer = buffer.clone();
+        self.flush_cache = buffer;
+    }
+}
+
+impl<D: DrawTarget> TerminalBuffer<D> {
+    #[inline]
+    pub fn read(&self, row: usize, col: usize) -> Cell {
+        let row = row % self.height();
+        self.buffer[row][col]
+    }
+
+    #[inline]
+    pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
+        let row = row % self.height();
+        self.buffer[row][col] = cell;
+
+        if CONFIG.lock().auto_flush {
+            self.graphic.write(row, col, cell);
+        }
     }
 
     #[inline]
@@ -32,42 +78,52 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         self.buffer
             .iter_mut()
             .for_each(|row| row.iter_mut().for_each(|c| *c = cell));
-        self.inner.clear(cell);
+
+        if CONFIG.lock().auto_flush {
+            for row in 0..self.height() {
+                for col in 0..self.width() {
+                    self.graphic.write(row, col, cell);
+                }
+            }
+        }
     }
 
     #[inline]
-    pub fn read(&self, row: usize, col: usize) -> Cell {
-        let row = row % self.inner.height();
-        self.buffer[row][col]
-    }
-
-    #[inline]
-    pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
-        let row = row % self.inner.height();
-        self.buffer[row][col] = cell;
-        self.inner.write(row, col, cell);
+    pub fn flush(&mut self) {
+        for (i, row) in self.buffer.iter().enumerate() {
+            for (j, &cell) in row.iter().enumerate() {
+                let backend = self.flush_cache[i][j];
+                if cell != backend {
+                    self.graphic.write(i, j, cell);
+                    self.flush_cache[i][j] = cell;
+                }
+            }
+        }
     }
 
     pub fn new_line(&mut self, cell: Cell) {
-        let mut prev_row = (0..self.width())
-            .map(|j| self.read(0, j))
-            .collect::<Vec<_>>();
+        if CONFIG.lock().auto_flush {
+            let mut prev_row = self.buffer[0].clone();
 
-        for i in 1..self.height() {
-            for j in 0..self.width() {
-                let current = self.read(i, j);
-                if prev_row[j] != current {
-                    self.write(i - 1, j, current);
+            for i in 1..self.height() {
+                for j in 0..self.width() {
+                    let current = self.read(i, j);
+                    if prev_row[j] != current {
+                        self.write(i - 1, j, current);
+                        prev_row[j] = current;
+                    }
                 }
-                prev_row[j] = current;
             }
-        }
 
-        for j in 0..self.width() {
-            let current = self.read(self.height() - 1, j);
-            if current != cell {
-                self.write(self.height() - 1, j, cell);
+            for j in 0..self.width() {
+                let current = self.read(self.height() - 1, j);
+                if current != cell {
+                    self.write(self.height() - 1, j, cell);
+                }
             }
+        } else {
+            self.buffer.pop_front();
+            self.buffer.push_back(vec![cell; self.width()]);
         }
     }
 }

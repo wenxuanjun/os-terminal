@@ -1,12 +1,6 @@
 use core::fmt;
-use spin::Mutex;
 
-static LOGGER: Mutex<Option<fn(fmt::Arguments)>> = Mutex::new(None);
-
-pub fn set_logger(logger: fn(fmt::Arguments)) {
-    let mut log = LOGGER.lock();
-    *log = Some(logger);
-}
+use crate::config::CONFIG;
 
 macro_rules! log {
     ($($arg:tt)*) => {
@@ -14,10 +8,8 @@ macro_rules! log {
     };
 }
 
-pub(crate) use log;
-
 pub(crate) fn log_message(args: fmt::Arguments) {
-    if let Some(logger) = *LOGGER.lock() {
+    if let Some(logger) = CONFIG.lock().logger {
         logger(args);
     }
 }

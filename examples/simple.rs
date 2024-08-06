@@ -1,10 +1,10 @@
 use minifb::{Key, Window, WindowOptions};
+use os_terminal::font::BitmapFont;
 use os_terminal::{DrawTarget, Rgb888, Terminal};
 
 use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 const DISPLAY_SIZE: (usize, usize) = (800, 600);
 
@@ -47,6 +47,12 @@ fn main() {
     .unwrap();
 
     let mut terminal = Terminal::new(display);
+    terminal.set_auto_flush(false);
+    terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
+    terminal.set_font_manager(Box::new(BitmapFont));
+
+    let terminal = Arc::new(Mutex::new(terminal));
+    let terminal_clone = terminal.clone();
 
     std::thread::spawn(move || {
         for c in std::io::stdin().lock().bytes() {
@@ -54,7 +60,7 @@ fn main() {
             if c == 0xff {
                 break;
             }
-            terminal.write_bstr(&[c]);
+            terminal_clone.lock().unwrap().write_bstr(&[c]);
         }
     });
 
@@ -64,10 +70,10 @@ fn main() {
                 .iter()
                 .map(|pixel| pixel.load(Ordering::Relaxed))
                 .collect::<Vec<_>>();
+            terminal.lock().unwrap().flush();
             window
                 .update_with_buffer(&buffer, DISPLAY_SIZE.0, DISPLAY_SIZE.1)
                 .unwrap();
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
 }

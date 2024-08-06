@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.2.5"
+version = "0.3.5"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -21,15 +21,22 @@ vte = "0.13.0"
 bitflags = "2.6.0"
 spin = "0.9.8"
 
+[dependencies.ab_glyph]
+version = "0.2.28"
+features = ["libm", "variable-fonts"]
+optional = true
+default_features = false
+
 [dependencies.noto-sans-mono-bitmap]
 version = "0.3.0"
 features = [
     "regular",
     "bold",
-    "size_16",
+    "size_20",
     "unicode-basic-latin",
     "unicode-specials",
 ]
+optional = true
 default-features = false
 
 [dev-dependencies]
@@ -39,3 +46,9 @@ crossbeam-channel = "0.5.13"
 [dev-dependencies.nix]
 version = "0.29.0"
 features = ["term", "process", "fs"]
+
+[features]
+default = ["bitmap"]
+bitmap = ["dep:noto-sans-mono-bitmap"]
+truetype = ["dep:ab_glyph"]
+

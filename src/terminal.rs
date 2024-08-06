@@ -1,10 +1,11 @@
 use core::{cmp::min, fmt};
 
-use super::ansi::{Attr, CursorShape, Handler, Performer};
-use super::ansi::{LineClearMode, ScreenClearMode};
-use super::buffer::TerminalBuffer;
-use super::cell::{Cell, Flags};
-use super::graphic::{DrawTarget, TextOnGraphic};
+use crate::ansi::{Attr, CursorShape, Handler, Performer};
+use crate::ansi::{LineClearMode, ScreenClearMode};
+use crate::buffer::TerminalBuffer;
+use crate::cell::{Cell, Flags};
+use crate::config::{FontManagerRef, CONFIG};
+use crate::graphic::{DrawTarget, TextOnGraphic};
 
 #[derive(Debug, Default, Clone, Copy)]
 struct Cursor {
@@ -49,6 +50,10 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.width()
     }
 
+    pub fn flush(&mut self) {
+        self.inner.buffer.flush();
+    }
+
     pub fn write_bstr(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
         let mut performer = Performer::new(&mut self.inner);
@@ -56,6 +61,22 @@ impl<D: DrawTarget> Terminal<D> {
             self.parser.advance(&mut performer, byte);
         }
         self.inner.cursor_handler(true);
+    }
+}
+
+impl<D: DrawTarget> Terminal<D> {
+    pub fn set_auto_flush(&mut self, auto_flush: bool) {
+        CONFIG.lock().auto_flush = auto_flush;
+    }
+
+    pub fn set_logger(&mut self, logger: Option<fn(fmt::Arguments)>) {
+        CONFIG.lock().logger = logger;
+    }
+
+    pub fn set_font_manager(&mut self, font_manager: FontManagerRef) {
+        let (font_width, font_height) = font_manager.size();
+        self.inner.buffer.update_size(font_width, font_height);
+        CONFIG.lock().font_manager = Some(font_manager);
     }
 }
 

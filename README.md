@@ -12,7 +12,8 @@ This screenshot shows the result of running `fastfetch` in the example terminal.
 
 ## Features
 
-- Embedded smooth noto font rendering
+- Embedded smooth noto sans mono font rendering
+- Truetype font support
 - VT100 and part of xterm escape sequence support
 - Beautiful color scheme
 - Cursor display and shape control
@@ -22,7 +23,9 @@ This screenshot shows the result of running `fastfetch` in the example terminal.
 Create a display wrapper to wrap your framebuffer and implement the `DrawTarget` trait for it.
 
 ```rust
+use alloc::boxed::Box;
 use os_terminal::{DrawTarget, Rgb888, Terminal};
+use os_terminal::font::BitmapFont;
 
 struct Display {
     width: usize,
@@ -43,19 +46,34 @@ impl DrawTarget for Display {
 }
 ```
 
-Then you can create a terminal and write to it.
+Then you can create a terminal with a box-wrapped font manager, and write to it.
 
 ```rust
 let mut terminal = Terminal::new(display);
+terminal.set_font_manager(Box::new(BitmapFont));
 terminal.write_bstr(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
+
+To use truetype font, you can create a `TrueTypeFont` instance from the font file bytes with a font size.
+
+```rust
+let font_buffer = include_bytes!("NotoSansMono-Regular.ttf");
+terminal.set_font_manager(Box::new(TrueTypeFont::new(14.0, font_buffer)));
+```
+
+Notice that you are supposed to use a variable font supported ttf file otherwise font weight will not change.
 
 If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
 ```rust
 os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
 ```
+
+## Features
+
+- `bitmap`: Enable embedded noto sans mono bitmap font support. This feature is enabled by default.
+- `truetype`: Enable truetype font support. This feature is disabled by default.
 
 ## Acknowledgement
 
