@@ -21,8 +21,8 @@ impl TrueTypeFont {
         let line_height = font.as_scaled(font_size).height();
         let base_line_offset = font.as_scaled(font_size).ascent();
 
-        let raster_height = line_height.ceil() as usize;
-        let raster_width = (line_height / 2.0).ceil() as usize;
+        let raster_height = line_height as usize;
+        let raster_width = (line_height / 2.0) as usize;
 
         Self {
             font,

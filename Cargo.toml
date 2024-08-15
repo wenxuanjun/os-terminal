@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -25,7 +25,7 @@ spin = "0.9.8"
 version = "0.2.28"
 features = ["libm", "variable-fonts"]
 optional = true
-default_features = false
+default-features = false
 
 [dependencies.noto-sans-mono-bitmap]
 version = "0.3.0"

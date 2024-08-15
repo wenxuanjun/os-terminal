@@ -34,6 +34,32 @@ pub enum Attr {
     Background(Color),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CharsetIndex {
+    G0,
+    G1,
+    G2,
+    G3,
+}
+
+impl Default for CharsetIndex {
+    fn default() -> Self {
+        CharsetIndex::G0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StandardCharset {
+    Ascii,
+    SpecialCharacterAndLineDrawing,
+}
+
+impl Default for StandardCharset {
+    fn default() -> Self {
+        StandardCharset::Ascii
+    }
+}
+
 pub trait Handler {
     fn input(&mut self, _content: char) {}
     fn goto(&mut self, _row: usize, _col: usize) {}
@@ -56,7 +82,12 @@ pub trait Handler {
     fn set_cursor_shape(&mut self, _shape: CursorShape) {}
     fn clear_line(&mut self, _mode: LineClearMode) {}
     fn clear_screen(&mut self, _mode: ScreenClearMode) {}
+    fn set_keypad_application_mode(&mut self) {}
+    fn unset_keypad_application_mode(&mut self) {}
+    fn reverse_index(&mut self) {}
     fn terminal_attribute(&mut self, _attr: Attr) {}
+    fn set_active_charset(&mut self, _index: CharsetIndex) {}   
+    fn configure_charset(&mut self, _index: CharsetIndex, _charset: StandardCharset) {}
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -93,6 +124,8 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             b'\x09' => self.handler.put_tab(),
             b'\x0A' => self.handler.linefeed(),
             b'\x0D' => self.handler.carriage_return(),
+            b'\x0F' => self.handler.set_active_charset(CharsetIndex::G0),
+            b'\x0E' => self.handler.set_active_charset(CharsetIndex::G1),
             _ => log!("Unhandled execute byte={:02x}", byte),
         }
     }
@@ -117,7 +150,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                         '2' => CursorShape::Underline,
                         _ => {
                             log!("Invalid cursor shape: {:?}", params[1]);
-                            return;
+                            return
                         }
                     };
                     self.handler.set_cursor_shape(shape);
@@ -219,15 +252,38 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
 
     fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
         macro_rules! configure_charset {
-            ($intermediates:expr) => {
-                log!("Unhandled charset: {:?}", $intermediates)
-            };
+            ($charset:path, $intermediates:expr) => {{
+                let index: CharsetIndex = match $intermediates {
+                    [b'('] => CharsetIndex::G0,
+                    [b')'] => CharsetIndex::G1,
+                    [b'*'] => CharsetIndex::G2,
+                    [b'+'] => CharsetIndex::G3,
+                    _ => {
+                        log!("Unhandled charset: {:?}", intermediates);
+                        return
+                    },
+                };
+                self.handler.configure_charset(index, $charset)
+            }};
         }
 
         match (byte, intermediates) {
+            (b'B', intermediates) => configure_charset!(StandardCharset::Ascii, intermediates),
+            (b'D', []) => self.handler.linefeed(),
+            (b'E', []) => {
+                self.handler.linefeed();
+                self.handler.carriage_return();
+            },
+
+            (b'M', []) => self.handler.reverse_index(),
+            (b'0', intermediates) => {
+                configure_charset!(StandardCharset::SpecialCharacterAndLineDrawing, intermediates)
+            },
             (b'7', []) => self.handler.save_cursor_position(),
             (b'8', []) => self.handler.restore_cursor_position(),
-            (b'B', intermediates) => configure_charset!(intermediates),
+    
+            (b'=', []) => self.handler.set_keypad_application_mode(),
+            (b'>', []) => self.handler.unset_keypad_application_mode(),
             _ => log!("Unhandled escape code: ESC {:?} {byte}", intermediates),
         }
     }
