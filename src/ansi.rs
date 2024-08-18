@@ -22,11 +22,13 @@ pub enum ScreenClearMode {
 pub enum Attr {
     Reset,
     Bold,
+    Italic,
     Underline,
     Reverse,
     Hidden,
     CancelBold,
     CancelBoldDim,
+    CancelItalic,
     CancelUnderline,
     CancelReverse,
     CancelHidden,
@@ -86,7 +88,7 @@ pub trait Handler {
     fn unset_keypad_application_mode(&mut self) {}
     fn reverse_index(&mut self) {}
     fn terminal_attribute(&mut self, _attr: Attr) {}
-    fn set_active_charset(&mut self, _index: CharsetIndex) {}   
+    fn set_active_charset(&mut self, _index: CharsetIndex) {}
     fn configure_charset(&mut self, _index: CharsetIndex, _charset: StandardCharset) {}
 }
 
@@ -132,7 +134,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         if params.is_empty() || params[0].is_empty() {
-            return;
+            return
         }
 
         match params[0] {
@@ -167,7 +169,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
         if ignore || intermediates.len() > 1 {
-            return;
+            return
         }
 
         let extract_one_param = |params: &Params, default: u16| {
@@ -202,7 +204,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     3 => ScreenClearMode::Saved,
                     _ => {
                         log!("Invalid clear screen mode: {:?}", params);
-                        return;
+                        return
                     }
                 };
                 self.handler.clear_screen(mode);
@@ -214,7 +216,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     2 => LineClearMode::All,
                     _ => {
                         log!("Invalid clear line mode: {:?}", params);
-                        return;
+                        return
                     }
                 };
                 self.handler.clear_line(mode);
@@ -229,7 +231,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     5 | 6 => Some(CursorShape::Beam),
                     _ => {
                         log!("Invalid cursor style: {:?}", cursor_style_id);
-                        return;
+                        return
                     }
                 };
                 self.handler
@@ -246,7 +248,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     });
                 }
             }
-            _ => {}
+            _ => log!("Unhandled csi_dispatch: CSI {params:?} {intermediates:?} {action:?}"),
         }
     }
 
@@ -261,7 +263,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     _ => {
                         log!("Unhandled charset: {:?}", intermediates);
                         return
-                    },
+                    }
                 };
                 self.handler.configure_charset(index, $charset)
             }};
@@ -273,15 +275,18 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             (b'E', []) => {
                 self.handler.linefeed();
                 self.handler.carriage_return();
-            },
+            }
 
             (b'M', []) => self.handler.reverse_index(),
             (b'0', intermediates) => {
-                configure_charset!(StandardCharset::SpecialCharacterAndLineDrawing, intermediates)
-            },
+                configure_charset!(
+                    StandardCharset::SpecialCharacterAndLineDrawing,
+                    intermediates
+                )
+            }
             (b'7', []) => self.handler.save_cursor_position(),
             (b'8', []) => self.handler.restore_cursor_position(),
-    
+
             (b'=', []) => self.handler.set_keypad_application_mode(),
             (b'>', []) => self.handler.unset_keypad_application_mode(),
             _ => log!("Unhandled escape code: ESC {:?} {byte}", intermediates),
@@ -309,12 +314,14 @@ fn attrs_from_sgr_parameters<F: FnMut(Attr)>(
         match param {
             [0] => terminal_attribute_handler(Attr::Reset),
             [1] => terminal_attribute_handler(Attr::Bold),
+            [3] => terminal_attribute_handler(Attr::Italic),
             [4, 0] => terminal_attribute_handler(Attr::CancelUnderline),
             [4, ..] => terminal_attribute_handler(Attr::Underline),
             [7] => terminal_attribute_handler(Attr::Reverse),
             [8] => terminal_attribute_handler(Attr::Hidden),
             [21] => terminal_attribute_handler(Attr::CancelBold),
             [22] => terminal_attribute_handler(Attr::CancelBoldDim),
+            [23] => terminal_attribute_handler(Attr::CancelItalic),
             [24] => terminal_attribute_handler(Attr::CancelUnderline),
             [27] => terminal_attribute_handler(Attr::CancelReverse),
             [28] => terminal_attribute_handler(Attr::CancelHidden),

@@ -1,10 +1,13 @@
 use core::{cmp::min, fmt};
 
+use alloc::boxed::Box;
+
 use crate::ansi::{Attr, CursorShape, Handler, Performer};
 use crate::ansi::{LineClearMode, ScreenClearMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
-use crate::config::{FontManagerRef, CONFIG};
+use crate::config::CONFIG;
+use crate::font::FontManager;
 use crate::graphic::{DrawTarget, TextOnGraphic};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -73,7 +76,7 @@ impl<D: DrawTarget> Terminal<D> {
         CONFIG.lock().logger = logger;
     }
 
-    pub fn set_font_manager(&mut self, font_manager: FontManagerRef) {
+    pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
         CONFIG.lock().font_manager = Some(font_manager);
@@ -276,6 +279,8 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             Attr::Bold => self.attribute_template.flags.insert(Flags::BOLD),
             Attr::CancelBold => self.attribute_template.flags.remove(Flags::BOLD),
             Attr::CancelBoldDim => self.attribute_template.flags.remove(Flags::BOLD),
+            Attr::Italic => self.attribute_template.flags.insert(Flags::ITALIC),
+            Attr::CancelItalic => self.attribute_template.flags.remove(Flags::ITALIC),
             Attr::Underline => self.attribute_template.flags.insert(Flags::UNDERLINE),
             Attr::CancelUnderline => self.attribute_template.flags.remove(Flags::UNDERLINE),
             Attr::Hidden => self.attribute_template.flags.insert(Flags::HIDDEN),

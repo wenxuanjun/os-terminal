@@ -5,11 +5,12 @@ bitflags::bitflags! {
     pub struct Flags: u16 {
         const INVERSE = 0b0000_0000_0001;
         const BOLD = 0b0000_0000_0010;
-        const HIDDEN = 0b0001_0000_0000;
+        const ITALIC = 0b0000_0000_0100;
         const UNDERLINE = 0b0000_0000_1000;
-        const CURSOR_BLOCK = 0b0000_0001_0000;
-        const CURSOR_UNDERLINE = 0b0000_0010_0000;
-        const CURSOR_BEAM = 0b0000_0100_0000;
+        const HIDDEN = 0b0000_0001_0000;
+        const CURSOR_BLOCK = 0b0000_0010_0000;
+        const CURSOR_UNDERLINE = 0b0000_0100_0000;
+        const CURSOR_BEAM = 0b0000_1000_0000;
     }
 }
 

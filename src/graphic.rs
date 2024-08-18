@@ -4,7 +4,7 @@ use core::mem::swap;
 use crate::cell::{Cell, Flags};
 use crate::color::Rgb888;
 use crate::config::CONFIG;
-use crate::font::{FontWeight, Rasterized};
+use crate::font::{ContentInfo, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
@@ -68,11 +68,11 @@ impl<D: DrawTarget> TextOnGraphic<D> {
             let (font_width, font_height) = font_manager.size();
             let (x_start, y_start) = (col * font_width, row * font_height);
 
-            let font_weight = if cell.flags.contains(Flags::BOLD) {
-                FontWeight::Bold
-            } else {
-                FontWeight::Regular
-            };
+            let content_info = ContentInfo::new(
+                cell.content,
+                cell.flags.contains(Flags::BOLD),
+                cell.flags.contains(Flags::ITALIC),
+            );
 
             macro_rules! draw_raster {
                 ($raster:ident) => {
@@ -85,7 +85,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
                 };
             }
 
-            match font_manager.rasterize(cell.content, font_weight) {
+            match font_manager.rasterize(content_info) {
                 Rasterized::Borrowed(raster) => draw_raster!(raster),
                 Rasterized::Owned(raster) => draw_raster!(raster),
             }

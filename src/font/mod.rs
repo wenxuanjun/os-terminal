@@ -15,13 +15,24 @@ pub enum Rasterized<'a> {
     Borrowed(&'a [&'a [u8]]),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FontWeight {
-    Regular,
-    Bold,
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ContentInfo {
+    content: char,
+    bold: bool,
+    italic: bool,
 }
 
-pub trait FontManager {
+impl ContentInfo {
+    pub fn new(content: char, bold: bool, italic: bool) -> Self {
+        Self {
+            content,
+            bold,
+            italic,
+        }
+    }
+}
+
+pub trait FontManager: Send {
     fn size(&self) -> (usize, usize);
-    fn rasterize(&mut self, content: char, weight: FontWeight) -> Rasterized;
+    fn rasterize(&mut self, info: ContentInfo) -> Rasterized;
 }

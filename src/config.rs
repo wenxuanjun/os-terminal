@@ -7,12 +7,10 @@ use crate::font::FontManager;
 pub static CONFIG: Lazy<Mutex<TerminalConfig>> =
     Lazy::new(|| Mutex::new(TerminalConfig::default()));
 
-pub type FontManagerRef = Box<dyn FontManager + Send>;
-
 pub struct TerminalConfig {
     pub auto_flush: bool,
     pub logger: Option<fn(fmt::Arguments)>,
-    pub font_manager: Option<FontManagerRef>,
+    pub font_manager: Option<Box<dyn FontManager>>,
 }
 
 impl Default for TerminalConfig {

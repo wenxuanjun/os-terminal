@@ -45,7 +45,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         let height = self.graphic.height() / font_height;
 
         if width == old_width && height == old_height {
-            return;
+            return
         }
 
         let buffer = VecDeque::from(vec![vec![Cell::default(); width]; height]);
@@ -65,11 +65,16 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
     #[inline]
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
+        if cell == self.read(row, col) {
+            return
+        }
+
         let row = row % self.height();
         self.buffer[row][col] = cell;
 
         if CONFIG.lock().auto_flush {
             self.graphic.write(row, col, cell);
+            self.flush_cache[row][col] = cell;
         }
     }
 
@@ -80,11 +85,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             .for_each(|row| row.iter_mut().for_each(|c| *c = cell));
 
         if CONFIG.lock().auto_flush {
-            for row in 0..self.height() {
-                for col in 0..self.width() {
-                    self.graphic.write(row, col, cell);
-                }
-            }
+            self.flush();
         }
     }
 
@@ -102,28 +103,11 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn new_line(&mut self, cell: Cell) {
+        self.buffer.pop_front();
+        self.buffer.push_back(vec![cell; self.width()]);
+
         if CONFIG.lock().auto_flush {
-            let mut prev_row = self.buffer[0].clone();
-
-            for i in 1..self.height() {
-                for j in 0..self.width() {
-                    let current = self.read(i, j);
-                    if prev_row[j] != current {
-                        self.write(i - 1, j, current);
-                        prev_row[j] = current;
-                    }
-                }
-            }
-
-            for j in 0..self.width() {
-                let current = self.read(self.height() - 1, j);
-                if current != cell {
-                    self.write(self.height() - 1, j, cell);
-                }
-            }
-        } else {
-            self.buffer.pop_front();
-            self.buffer.push_back(vec![cell; self.width()]);
+            self.flush();
         }
     }
 }

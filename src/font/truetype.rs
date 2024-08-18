@@ -1,16 +1,16 @@
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont, VariableFont};
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use super::{FontManager, FontWeight, Rasterized};
+use super::{ContentInfo, FontManager, Rasterized};
 
-#[derive(Debug)]
 pub struct TrueTypeFont {
     font: FontRef<'static>,
+    italic_font: Option<FontRef<'static>>,
     raster_height: usize,
     raster_width: usize,
     font_size: PxScale,
     base_line_offset: f32,
-    bitmap_cache: BTreeMap<(char, FontWeight), Vec<Vec<u8>>>,
+    bitmap_cache: BTreeMap<ContentInfo, Vec<Vec<u8>>>,
 }
 
 impl TrueTypeFont {
@@ -26,12 +26,18 @@ impl TrueTypeFont {
 
         Self {
             font,
+            italic_font: None,
             raster_height,
             raster_width,
             font_size,
             base_line_offset,
             bitmap_cache: BTreeMap::new(),
         }
+    }
+
+    pub fn with_italic_font(mut self, italic_font: &'static [u8]) -> Self {
+        self.italic_font = Some(FontRef::try_from_slice(italic_font).unwrap());
+        self
     }
 }
 
@@ -40,22 +46,27 @@ impl FontManager for TrueTypeFont {
         (self.raster_width, self.raster_height)
     }
 
-    fn rasterize(&mut self, content: char, weight: FontWeight) -> Rasterized {
-        if let Some(bitmap) = self.bitmap_cache.get(&(content, weight.clone())) {
+    fn rasterize(&mut self, info: ContentInfo) -> Rasterized {
+        if let Some(bitmap) = self.bitmap_cache.get(&info) {
             return Rasterized::Owned(bitmap.clone());
         }
 
-        let font_weight = match weight {
-            FontWeight::Regular => 400.0,
-            FontWeight::Bold => 700.0,
+        let select_font = if info.italic {
+            self.italic_font.as_mut().unwrap_or(&mut self.font)
+        } else {
+            &mut self.font
         };
 
-        self.font.set_variation(b"wght", font_weight);
+        let font_weight = if info.bold { 700.0 } else { 400.0 };
+        select_font.set_variation(b"wght", font_weight);
 
-        let glyph = self.font.glyph_id(content).with_scale(self.font_size);
+        let glyph = select_font
+            .glyph_id(info.content)
+            .with_scale(self.font_size);
+
         let mut letter_bitmap = vec![vec![0u8; self.raster_width]; self.raster_height];
 
-        if let Some(bitmap) = self.font.outline_glyph(glyph) {
+        if let Some(bitmap) = select_font.outline_glyph(glyph) {
             let px_bounds = bitmap.px_bounds();
 
             let x_offset = px_bounds.min.x as isize;
@@ -73,7 +84,7 @@ impl FontManager for TrueTypeFont {
             });
         }
 
-        self.bitmap_cache.insert((content, weight), letter_bitmap.clone());
+        self.bitmap_cache.insert(info, letter_bitmap.clone());
 
         Rasterized::Owned(letter_bitmap)
     }

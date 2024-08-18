@@ -58,11 +58,20 @@ terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 To use truetype font, enable `truetype` feature and create a `TrueTypeFont` instance from a font file with size.
 
 ```rust
-let font_buffer = include_bytes!("NotoSansMono-Regular.ttf");
+let font_buffer = include_bytes!("SourceCodeVF.otf");
 terminal.set_font_manager(Box::new(TrueTypeFont::new(14.0, font_buffer)));
 ```
 
 Notice that you are supposed to use a variable-font-supported ttf file otherwise font weight will not change.
+
+Italic font support is also optional. If not provided, it will be rendered with default Roman font.
+
+```rust
+let font_buffer = include_bytes!("SourceCodeVF.otf");
+let italic_buffer = include_bytes!("SourceCodeVF-Italic.otf");
+let font_manager = TrueTypeFont::new(10.0, font_buffer).with_italic_font(italic_buffer);
+terminal.set_font_manager(Box::new(font_manager));
+```
 
 If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
