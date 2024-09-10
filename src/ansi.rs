@@ -36,30 +36,20 @@ pub enum Attr {
     Background(Color),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CharsetIndex {
+    #[default]
     G0,
     G1,
     G2,
     G3,
 }
 
-impl Default for CharsetIndex {
-    fn default() -> Self {
-        CharsetIndex::G0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StandardCharset {
+    #[default]
     Ascii,
     SpecialCharacterAndLineDrawing,
-}
-
-impl Default for StandardCharset {
-    fn default() -> Self {
-        StandardCharset::Ascii
-    }
 }
 
 pub trait Handler {
@@ -92,17 +82,12 @@ pub trait Handler {
     fn configure_charset(&mut self, _index: CharsetIndex, _charset: StandardCharset) {}
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
 pub enum CursorShape {
+    #[default]
     Block,
     Underline,
     Beam,
-}
-
-impl Default for CursorShape {
-    fn default() -> CursorShape {
-        CursorShape::Block
-    }
 }
 
 pub struct Performer<'a, H: Handler> {
@@ -134,7 +119,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         if params.is_empty() || params[0].is_empty() {
-            return
+            return;
         }
 
         match params[0] {
@@ -152,7 +137,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                         '2' => CursorShape::Underline,
                         _ => {
                             log!("Invalid cursor shape: {:?}", params[1]);
-                            return
+                            return;
                         }
                     };
                     self.handler.set_cursor_shape(shape);
@@ -169,7 +154,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
         if ignore || intermediates.len() > 1 {
-            return
+            return;
         }
 
         let extract_one_param = |params: &Params, default: u16| {
@@ -204,7 +189,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     3 => ScreenClearMode::Saved,
                     _ => {
                         log!("Invalid clear screen mode: {:?}", params);
-                        return
+                        return;
                     }
                 };
                 self.handler.clear_screen(mode);
@@ -216,7 +201,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     2 => LineClearMode::All,
                     _ => {
                         log!("Invalid clear line mode: {:?}", params);
-                        return
+                        return;
                     }
                 };
                 self.handler.clear_line(mode);
@@ -231,11 +216,11 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     5 | 6 => Some(CursorShape::Beam),
                     _ => {
                         log!("Invalid cursor style: {:?}", cursor_style_id);
-                        return
+                        return;
                     }
                 };
                 self.handler
-                    .set_cursor_shape(shape.unwrap_or(CursorShape::default()));
+                    .set_cursor_shape(shape.unwrap_or_else(CursorShape::default));
             }
             ('X', []) => self.handler.erase_chars(extract_one_param(params, 1)),
             ('d', []) => self.handler.goto_line(extract_one_param(params, 1) - 1),
@@ -244,7 +229,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     self.handler.terminal_attribute(Attr::Reset);
                 } else {
                     attrs_from_sgr_parameters(&mut params.iter(), |attr| {
-                        self.handler.terminal_attribute(attr)
+                        self.handler.terminal_attribute(attr);
                     });
                 }
             }
@@ -262,7 +247,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     [b'+'] => CharsetIndex::G3,
                     _ => {
                         log!("Unhandled charset: {:?}", intermediates);
-                        return
+                        return;
                     }
                 };
                 self.handler.configure_charset(index, $charset)
@@ -282,7 +267,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                 configure_charset!(
                     StandardCharset::SpecialCharacterAndLineDrawing,
                     intermediates
-                )
+                );
             }
             (b'7', []) => self.handler.save_cursor_position(),
             (b'8', []) => self.handler.restore_cursor_position(),

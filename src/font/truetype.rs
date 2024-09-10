@@ -48,7 +48,7 @@ impl FontManager for TrueTypeFont {
 
     fn rasterize(&mut self, info: ContentInfo) -> Rasterized {
         if let Some(bitmap) = self.bitmap_cache.get(&info) {
-            return Rasterized::Owned(bitmap.clone());
+            return Rasterized::Vec(bitmap.clone());
         }
 
         let select_font = if info.italic {
@@ -86,6 +86,6 @@ impl FontManager for TrueTypeFont {
 
         self.bitmap_cache.insert(info, letter_bitmap.clone());
 
-        Rasterized::Owned(letter_bitmap)
+        Rasterized::Vec(letter_bitmap)
     }
 }

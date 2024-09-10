@@ -15,7 +15,7 @@ pub struct TerminalConfig {
 
 impl Default for TerminalConfig {
     fn default() -> Self {
-        TerminalConfig {
+        Self {
             auto_flush: true,
             logger: None,
             font_manager: None,

@@ -16,12 +16,12 @@ pub struct TerminalBuffer<D: DrawTarget> {
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.size.0
     }
 
     #[inline]
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.size.1
     }
 }
@@ -30,7 +30,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn new(graphic: TextOnGraphic<D>) -> Self {
         let buffer = VecDeque::from(vec![vec![Cell::default(); DEFAULT_SIZE.0]; DEFAULT_SIZE.1]);
 
-        TerminalBuffer {
+        Self {
             graphic,
             size: DEFAULT_SIZE,
             buffer: buffer.clone(),
@@ -45,13 +45,13 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         let height = self.graphic.height() / font_height;
 
         if width == old_width && height == old_height {
-            return
+            return;
         }
 
         let buffer = VecDeque::from(vec![vec![Cell::default(); width]; height]);
 
         self.size = (width, height);
-        self.buffer = buffer.clone();
+        self.buffer.clone_from(&buffer);
         self.flush_cache = buffer;
     }
 }
@@ -66,7 +66,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
         if cell == self.read(row, col) {
-            return
+            return;
         }
 
         let row = row % self.height();

@@ -23,7 +23,7 @@ pub enum NamedColor {
 
 pub type Rgb888 = (u8, u8, u8);
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     Indexed(u8),
     Rgb(Rgb888),
@@ -32,8 +32,8 @@ pub enum Color {
 impl Color {
     pub fn to_rgb(self) -> Rgb888 {
         match self {
-            Color::Rgb(rgb) => rgb,
-            Color::Indexed(idx) => COLOR_SCHEME[idx as usize],
+            Self::Rgb(rgb) => rgb,
+            Self::Indexed(idx) => COLOR_SCHEME[idx as usize],
         }
     }
 }

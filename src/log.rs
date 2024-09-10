@@ -8,7 +8,7 @@ macro_rules! log {
     };
 }
 
-pub(crate) fn log_message(args: fmt::Arguments) {
+pub fn log_message(args: fmt::Arguments) {
     if let Some(logger) = CONFIG.lock().logger {
         logger(args);
     }

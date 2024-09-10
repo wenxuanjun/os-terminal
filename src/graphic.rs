@@ -4,7 +4,7 @@ use core::mem::swap;
 use crate::cell::{Cell, Flags};
 use crate::color::Rgb888;
 use crate::config::CONFIG;
-use crate::font::{ContentInfo, Rasterized};
+use crate::font::ContentInfo;
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
@@ -31,7 +31,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
 }
 
 impl<D: DrawTarget> TextOnGraphic<D> {
-    pub fn new(graphic: D) -> Self {
+    pub const fn new(graphic: D) -> Self {
         Self {
             graphic,
             color_cache: BTreeMap::new(),
@@ -74,25 +74,20 @@ impl<D: DrawTarget> TextOnGraphic<D> {
                 cell.flags.contains(Flags::ITALIC),
             );
 
-            macro_rules! draw_raster {
-                ($raster:ident) => {
-                    for (y, lines) in $raster.iter().enumerate() {
-                        for (x, &intensity) in lines.iter().enumerate() {
-                            let (r, g, b) = color_cache.colors[intensity as usize];
-                            self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
-                        }
-                    }
-                };
-            }
-
-            match font_manager.rasterize(content_info) {
-                Rasterized::Borrowed(raster) => draw_raster!(raster),
-                Rasterized::Owned(raster) => draw_raster!(raster),
+            for (y, lines) in font_manager
+                .rasterize(content_info)
+                .as_2d_array()
+                .enumerate()
+            {
+                for (x, &intensity) in lines.iter().enumerate() {
+                    let (r, g, b) = color_cache.colors[intensity as usize];
+                    self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
+                }
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
-                for y in 0..font_height as usize {
-                    let (r, g, b) = color_cache.colors[0xff as usize];
+                for y in 0..font_height {
+                    let (r, g, b) = color_cache.colors[0xff];
                     self.graphic.draw_pixel(x_start, y_start + y, (r, g, b));
                 }
             }
@@ -100,12 +95,9 @@ impl<D: DrawTarget> TextOnGraphic<D> {
             if cell.flags.contains(Flags::UNDERLINE) || cell.flags.contains(Flags::CURSOR_UNDERLINE)
             {
                 for x in 0..font_width {
-                    let (r, g, b) = color_cache.colors[0xff as usize];
-                    self.graphic.draw_pixel(
-                        x_start + x,
-                        y_start + font_height as usize - 1,
-                        (r, g, b),
-                    );
+                    let (r, g, b) = color_cache.colors[0xff];
+                    self.graphic
+                        .draw_pixel(x_start + x, y_start + font_height - 1, (r, g, b));
                 }
             }
         }
@@ -124,14 +116,14 @@ impl ColorCache {
 
         let mut colors = [(0u8, 0u8, 0u8); 256];
 
-        for intensity in 0..256 {
+        for (intensity, color) in colors.iter_mut().enumerate() {
             let weight = intensity as i32;
             let r = ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
             let g = ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
             let b = ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            colors[intensity] = (r, g, b);
+            *color = (r, g, b);
         }
 
-        ColorCache { colors }
+        Self { colors }
     }
 }

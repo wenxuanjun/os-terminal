@@ -34,7 +34,7 @@ impl<D: DrawTarget> Terminal<D> {
         let mut graphic = TextOnGraphic::new(display);
         graphic.clear(Cell::default());
 
-        Terminal {
+        Self {
             parser: vte::Parser::new(),
             inner: TerminalInner {
                 cursor: Cursor::default(),
@@ -45,11 +45,11 @@ impl<D: DrawTarget> Terminal<D> {
         }
     }
 
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.inner.buffer.height()
     }
 
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.inner.buffer.width()
     }
 
@@ -130,20 +130,20 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn goto_line(&mut self, row: usize) {
-        self.goto(row, self.cursor.column)
+        self.goto(row, self.cursor.column);
     }
 
     fn goto_column(&mut self, col: usize) {
-        self.goto(self.cursor.row, col)
+        self.goto(self.cursor.row, col);
     }
 
     fn move_up(&mut self, rows: usize) {
-        self.goto(self.cursor.row.saturating_sub(rows), self.cursor.column)
+        self.goto(self.cursor.row.saturating_sub(rows), self.cursor.column);
     }
 
     fn move_down(&mut self, rows: usize) {
         let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as _;
-        self.goto(goto_line, self.cursor.column)
+        self.goto(goto_line, self.cursor.column);
     }
 
     fn move_forward(&mut self, cols: usize) {
@@ -155,12 +155,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn move_up_and_cr(&mut self, rows: usize) {
-        self.goto(self.cursor.row.saturating_sub(rows), 0)
+        self.goto(self.cursor.row.saturating_sub(rows), 0);
     }
 
     fn move_down_and_cr(&mut self, rows: usize) {
         let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as _;
-        self.goto(goto_line, 0)
+        self.goto(goto_line, 0);
     }
 
     fn put_tab(&mut self) {
