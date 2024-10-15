@@ -59,10 +59,9 @@ Now you can redirect the keyboard events to the terminal in scancode format (cur
 // LCtrl pressed, C pressed, C released, LCtrl released
 let scancodes = [0x1d, 0x2e, 0xae, 0x9d];
 
-// Some("") Some("\u{3}") None None
 for scancode in scancodes.iter() {
     if let Some(ansi_string) = terminal.handle_keyboard(*scancode) {
-        // Pass the ansi_string to your shell
+        // Pass the ansi_string to your shell (Some("") Some("\u{3}") None None)
     }
 }
 ```

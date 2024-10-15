@@ -157,17 +157,28 @@ impl<D: DrawTarget> TerminalInner<D> {
 
 impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn input(&mut self, content: char) {
-        if self.cursor.column >= self.buffer.width() {
+        let template = self.attribute_template.with_content(content);
+
+        if self.cursor.column + template.width_ratio > self.buffer.width() {
             if !self.mode.contains(TerminalMode::LINE_WRAP) {
                 return;
             }
             self.cursor.column = 0;
             self.linefeed();
         }
-        let template = self.attribute_template.with_content(content);
+
         self.buffer
             .write(self.cursor.row, self.cursor.column, template);
         self.cursor.column += 1;
+
+        for _ in 0..(template.width_ratio - 1) {
+            self.buffer.write(
+                self.cursor.row,
+                self.cursor.column,
+                template.with_placeholder(),
+            );
+            self.cursor.column += 1;
+        }
     }
 
     fn goto(&mut self, row: usize, col: usize) {
@@ -342,7 +353,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 self.keyboard.set_app_cursor(true);
             }
             Mode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
-            _ => {}
+            _ => log!("Unhandled set mode: {:?}", mode),
         }
     }
 
@@ -355,7 +366,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 self.keyboard.set_app_cursor(false);
             }
             Mode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
-            _ => {}
+            _ => log!("Unhandled unset mode: {:?}", mode),
         }
     }
 }

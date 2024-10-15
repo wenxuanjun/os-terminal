@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthChar;
+
 use super::color::{Color, NamedColor};
 
 bitflags::bitflags! {
@@ -20,6 +22,8 @@ pub struct Cell {
     pub flags: Flags,
     pub foreground: Color,
     pub background: Color,
+    pub width_ratio: usize,
+    pub placeholder: bool,
 }
 
 impl Cell {
@@ -30,8 +34,19 @@ impl Cell {
         }
     }
 
-    pub const fn with_content(&self, content: char) -> Self {
-        Self { content, ..*self }
+    pub fn with_placeholder(&self) -> Self {
+        Self {
+            placeholder: true,
+            ..*self
+        }
+    }
+
+    pub fn with_content(&self, content: char) -> Self {
+        Self {
+            content,
+            width_ratio: content.width().unwrap(),
+            ..*self
+        }
     }
 }
 
@@ -42,6 +57,8 @@ impl Default for Cell {
             flags: Flags::empty(),
             foreground: Color::Indexed(NamedColor::BrightWhite as u8),
             background: Color::Indexed(NamedColor::Black as u8),
+            width_ratio: 1,
+            placeholder: false,
         }
     }
 }

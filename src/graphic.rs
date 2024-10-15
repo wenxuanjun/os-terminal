@@ -48,6 +48,10 @@ impl<D: DrawTarget> TextOnGraphic<D> {
     }
 
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
+        if cell.placeholder {
+            return;
+        }
+
         let mut foreground = cell.foreground.to_rgb();
         let mut background = cell.background.to_rgb();
 
@@ -72,6 +76,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
                 cell.content,
                 cell.flags.contains(Flags::BOLD),
                 cell.flags.contains(Flags::ITALIC),
+                cell.width_ratio,
             );
 
             for (y, lines) in font_manager

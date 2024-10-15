@@ -60,11 +60,13 @@ impl FontManager for TrueTypeFont {
         let font_weight = if info.bold { 700.0 } else { 400.0 };
         select_font.set_variation(b"wght", font_weight);
 
+        let actual_width = self.raster_width * info.width_ratio;
+
         let glyph = select_font
             .glyph_id(info.content)
             .with_scale(self.font_size);
 
-        let mut letter_bitmap = vec![vec![0u8; self.raster_width]; self.raster_height];
+        let mut letter_bitmap = vec![vec![0u8; actual_width]; self.raster_height];
 
         if let Some(bitmap) = select_font.outline_glyph(glyph) {
             let px_bounds = bitmap.px_bounds();
@@ -76,7 +78,7 @@ impl FontManager for TrueTypeFont {
                 let x = x_offset + x as isize;
                 let y = y_offset + y as isize;
 
-                if (x >= 0 && x < self.raster_width as isize)
+                if (x >= 0 && x < actual_width as isize)
                     && (y >= 0 && y < self.raster_height as isize)
                 {
                     letter_bitmap[y as usize][x as usize] = (c * 255.0) as u8;

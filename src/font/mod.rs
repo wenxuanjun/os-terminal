@@ -15,14 +15,16 @@ pub struct ContentInfo {
     content: char,
     bold: bool,
     italic: bool,
+    width_ratio: usize,
 }
 
 impl ContentInfo {
-    pub const fn new(content: char, bold: bool, italic: bool) -> Self {
+    pub const fn new(content: char, bold: bool, italic: bool, width_ratio: usize) -> Self {
         Self {
             content,
             bold,
             italic,
+            width_ratio,
         }
     }
 }

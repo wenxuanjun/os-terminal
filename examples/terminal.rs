@@ -18,7 +18,7 @@ use os_terminal::{DrawTarget, Rgb888, Terminal};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::scancode::PhysicalKeyExtScancode;
@@ -140,7 +140,7 @@ impl DrawTarget for Display {
     }
 }
 
-pub(crate) struct App {
+struct App {
     ansi_sender: Sender<String>,
     buffer: Arc<Vec<AtomicU32>>,
     terminal: Arc<Mutex<Terminal<Display>>>,
@@ -170,11 +170,18 @@ impl ApplicationHandler for App {
         let attributes = WindowAttributes::default()
             .with_title("Terminal")
             .with_resizable(false)
-            .with_inner_size(LogicalSize::new(width as f64, height as f64));
+            .with_inner_size(PhysicalSize::new(width as f64, height as f64));
         let window = Rc::new(event_loop.create_window(attributes).unwrap());
 
         let context = Context::new(window.clone()).unwrap();
-        let surface = Surface::new(&context, window.clone()).unwrap();
+        let mut surface = Surface::new(&context, window.clone()).unwrap();
+
+        surface
+            .resize(
+                NonZeroU32::new(width as u32).unwrap(),
+                NonZeroU32::new(height as u32).unwrap(),
+            )
+            .unwrap();
 
         self.window = Some(window);
         self.surface = Some(surface);
@@ -198,24 +205,17 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if window_id == window.id() {
                     let surface = self.surface.as_mut().unwrap();
+                    self.terminal.lock().unwrap().flush();
 
-                    if let (Some(width), Some(height)) = {
-                        let size = window.inner_size();
-                        (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-                    } {
-                        surface.resize(width, height).unwrap();
-                        self.terminal.lock().unwrap().flush();
+                    let buffer = self
+                        .buffer
+                        .iter()
+                        .map(|pixel| pixel.load(Ordering::Relaxed))
+                        .collect::<Vec<_>>();
 
-                        let buffer = self
-                            .buffer
-                            .iter()
-                            .map(|pixel| pixel.load(Ordering::Relaxed))
-                            .collect::<Vec<_>>();
-
-                        let mut surface_buffer = surface.buffer_mut().unwrap();
-                        surface_buffer.copy_from_slice(&buffer[..]);
-                        surface_buffer.present().unwrap();
-                    }
+                    let mut surface_buffer = surface.buffer_mut().unwrap();
+                    surface_buffer.copy_from_slice(&buffer[..]);
+                    surface_buffer.present().unwrap();
                 }
             }
             WindowEvent::CloseRequested => {
