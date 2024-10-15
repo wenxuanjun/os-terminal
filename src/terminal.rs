@@ -1,14 +1,47 @@
 use core::{cmp::min, fmt};
 
 use alloc::boxed::Box;
+use alloc::string::String;
 
-use crate::ansi::{Attr, CursorShape, Handler, Performer};
+use crate::ansi::{Attr, CursorShape, Handler, Mode, Performer};
 use crate::ansi::{LineClearMode, ScreenClearMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
 use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, TextOnGraphic};
+use crate::keyboard::KeyboardManager;
+
+bitflags::bitflags! {
+    pub struct TerminalMode: u32 {
+        const SHOW_CURSOR = 1 << 0;
+        const APP_CURSOR = 1 << 1;
+        const APP_KEYPAD = 1 << 2;
+        const MOUSE_REPORT_CLICK = 1 << 3;
+        const BRACKETED_PASTE = 1 << 4;
+        const SGR_MOUSE = 1 << 5;
+        const MOUSE_MOTION = 1 << 6;
+        const LINE_WRAP = 1 << 7;
+        const LINE_FEED_NEW_LINE = 1 << 8;
+        const ORIGIN = 1 << 9;
+        const INSERT = 1 << 10;
+        const FOCUS_IN_OUT = 1 << 11;
+        const ALT_SCREEN = 1 << 12;
+        const MOUSE_DRAG = 1 << 13;
+        const MOUSE_MODE = 1 << 14;
+        const UTF8_MOUSE = 1 << 15;
+        const ALTERNATE_SCROLL = 1 << 16;
+        const VI = 1 << 17;
+        const URGENCY_HINTS = 1 << 18;
+        const ANY = core::u32::MAX;
+    }
+}
+
+impl Default for TerminalMode {
+    fn default() -> TerminalMode {
+        TerminalMode::SHOW_CURSOR | TerminalMode::LINE_WRAP
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 struct Cursor {
@@ -25,8 +58,10 @@ pub struct Terminal<D: DrawTarget> {
 pub struct TerminalInner<D: DrawTarget> {
     cursor: Cursor,
     saved_cursor: Cursor,
+    mode: TerminalMode,
     attribute_template: Cell,
     buffer: TerminalBuffer<D>,
+    keyboard: KeyboardManager,
 }
 
 impl<D: DrawTarget> Terminal<D> {
@@ -39,8 +74,10 @@ impl<D: DrawTarget> Terminal<D> {
             inner: TerminalInner {
                 cursor: Cursor::default(),
                 saved_cursor: Cursor::default(),
+                mode: TerminalMode::default(),
                 attribute_template: Cell::default(),
                 buffer: TerminalBuffer::new(graphic),
+                keyboard: KeyboardManager::new(),
             },
         }
     }
@@ -57,13 +94,19 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.flush();
     }
 
-    pub fn write_bstr(&mut self, bstr: &[u8]) {
+    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
+        self.inner.keyboard.handle_keyboard(scancode)
+    }
+
+    pub fn advance_state(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
         let mut performer = Performer::new(&mut self.inner);
         for &byte in bstr {
             self.parser.advance(&mut performer, byte);
         }
-        self.inner.cursor_handler(true);
+        if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
+            self.inner.cursor_handler(true);
+        }
     }
 }
 
@@ -85,7 +128,7 @@ impl<D: DrawTarget> Terminal<D> {
 
 impl<D: DrawTarget> fmt::Write for Terminal<D> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.write_bstr(s.as_bytes());
+        self.advance_state(s.as_bytes());
         Ok(())
     }
 }
@@ -115,6 +158,9 @@ impl<D: DrawTarget> TerminalInner<D> {
 impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn input(&mut self, content: char) {
         if self.cursor.column >= self.buffer.width() {
+            if !self.mode.contains(TerminalMode::LINE_WRAP) {
+                return;
+            }
             self.cursor.column = 0;
             self.linefeed();
         }
@@ -285,6 +331,31 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             Attr::CancelUnderline => self.attribute_template.flags.remove(Flags::UNDERLINE),
             Attr::Hidden => self.attribute_template.flags.insert(Flags::HIDDEN),
             Attr::CancelHidden => self.attribute_template.flags.remove(Flags::HIDDEN),
+        }
+    }
+
+    fn set_mode(&mut self, mode: Mode) {
+        match mode {
+            Mode::ShowCursor => self.mode.insert(TerminalMode::SHOW_CURSOR),
+            Mode::CursorKeys => {
+                self.mode.insert(TerminalMode::APP_CURSOR);
+                self.keyboard.set_app_cursor(true);
+            }
+            Mode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
+            _ => {}
+        }
+    }
+
+    #[inline]
+    fn unset_mode(&mut self, mode: Mode) {
+        match mode {
+            Mode::ShowCursor => self.mode.remove(TerminalMode::SHOW_CURSOR),
+            Mode::CursorKeys => {
+                self.mode.remove(TerminalMode::APP_CURSOR);
+                self.keyboard.set_app_cursor(false);
+            }
+            Mode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
+            _ => {}
         }
     }
 }

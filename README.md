@@ -8,7 +8,7 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 
 ![](screenshot.png)
 
-This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --example terminal` (Linux only). It will execute `bash` by default.
+This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --release --example terminal --features=truetype` (Linux only). It will execute `bash` by default.
 
 ## Features
 
@@ -46,12 +46,31 @@ impl DrawTarget for Display {
 }
 ```
 
-Then you can create a terminal with a box-wrapped font manager, and write to it.
+Then you can create a terminal with a box-wrapped font manager.
 
 ```rust
 let mut terminal = Terminal::new(display);
 terminal.set_font_manager(Box::new(BitmapFont));
-terminal.write_bstr(b"\x1b[31mHello, world!\x1b[0m");
+```
+
+Now you can redirect the keyboard events to the terminal in scancode format (currently only Scan Code Set1 and North American standard English keyboard layout are supported) to let the terminal process shortcuts or get escaped strings so you can pass it to your shell.
+
+```rust
+// LCtrl pressed, C pressed, C released, LCtrl released
+let scancodes = [0x1d, 0x2e, 0xae, 0x9d];
+
+// Some("") Some("\u{3}") None None
+for scancode in scancodes.iter() {
+    if let Some(ansi_string) = terminal.handle_keyboard(*scancode) {
+        // Pass the ansi_string to your shell
+    }
+}
+```
+
+And then you can advance the terminal state with the escaped string from the output of your shell.
+
+```rust
+terminal.advance_state(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
@@ -59,7 +78,7 @@ To use truetype font, enable `truetype` feature and create a `TrueTypeFont` inst
 
 ```rust
 let font_buffer = include_bytes!("SourceCodeVF.otf");
-terminal.set_font_manager(Box::new(TrueTypeFont::new(14.0, font_buffer)));
+terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
 ```
 
 Notice that you are supposed to use a variable-font-supported ttf file otherwise font weight will not change.

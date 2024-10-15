@@ -13,6 +13,7 @@ mod cell;
 mod color;
 mod config;
 mod graphic;
+mod keyboard;
 mod terminal;
 
 pub mod font;
@@ -20,3 +21,4 @@ pub mod font;
 pub use color::Rgb888;
 pub use graphic::DrawTarget;
 pub use terminal::Terminal;
+pub use keyboard::KeyboardManager;

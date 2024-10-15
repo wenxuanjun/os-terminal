@@ -3,14 +3,14 @@ use super::color::{Color, NamedColor};
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Flags: u16 {
-        const INVERSE = 0b0000_0000_0001;
-        const BOLD = 0b0000_0000_0010;
-        const ITALIC = 0b0000_0000_0100;
-        const UNDERLINE = 0b0000_0000_1000;
-        const HIDDEN = 0b0000_0001_0000;
-        const CURSOR_BLOCK = 0b0000_0010_0000;
-        const CURSOR_UNDERLINE = 0b0000_0100_0000;
-        const CURSOR_BEAM = 0b0000_1000_0000;
+        const INVERSE = 1 << 0;
+        const BOLD = 1 << 1;
+        const ITALIC = 1 << 2;
+        const UNDERLINE = 1 << 3;
+        const HIDDEN = 1 << 4;
+        const CURSOR_BLOCK = 1 << 5;
+        const CURSOR_UNDERLINE = 1 << 6;
+        const CURSOR_BEAM = 1 << 7;
     }
 }
 

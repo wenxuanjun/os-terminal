@@ -36,6 +36,69 @@ pub enum Attr {
     Background(Color),
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum Mode {
+    CursorKeys = 1,
+    ColumnMode = 3,
+    Insert = 4,
+    Origin = 6,
+    LineWrap = 7,
+    BlinkingCursor = 12,
+    LineFeedNewLine = 20,
+    ShowCursor = 25,
+    ReportMouseClicks = 1000,
+    ReportCellMouseMotion = 1002,
+    ReportAllMouseMotion = 1003,
+    ReportFocusInOut = 1004,
+    Utf8Mouse = 1005,
+    SgrMouse = 1006,
+    AlternateScroll = 1007,
+    UrgencyHints = 1042,
+    SwapScreenAndSetRestoreCursor = 1049,
+    BracketedPaste = 2004,
+}
+
+impl Mode {
+    pub fn from_primitive(intermediate: Option<&u8>, num: u16) -> Option<Mode> {
+        let private = match intermediate {
+            Some(b'?') => true,
+            None => false,
+            _ => return None,
+        };
+
+        if private {
+            Some(match num {
+                1 => Mode::CursorKeys,
+                3 => Mode::ColumnMode,
+                6 => Mode::Origin,
+                7 => Mode::LineWrap,
+                12 => Mode::BlinkingCursor,
+                25 => Mode::ShowCursor,
+                1000 => Mode::ReportMouseClicks,
+                1002 => Mode::ReportCellMouseMotion,
+                1003 => Mode::ReportAllMouseMotion,
+                1004 => Mode::ReportFocusInOut,
+                1005 => Mode::Utf8Mouse,
+                1006 => Mode::SgrMouse,
+                1007 => Mode::AlternateScroll,
+                1042 => Mode::UrgencyHints,
+                1049 => Mode::SwapScreenAndSetRestoreCursor,
+                2004 => Mode::BracketedPaste,
+                _ => {
+                    log!("Unimplemented primitive mode: {}", num);
+                    return None;
+                }
+            })
+        } else {
+            Some(match num {
+                4 => Mode::Insert,
+                20 => Mode::LineFeedNewLine,
+                _ => return None,
+            })
+        }
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CharsetIndex {
     #[default]
@@ -80,6 +143,8 @@ pub trait Handler {
     fn terminal_attribute(&mut self, _attr: Attr) {}
     fn set_active_charset(&mut self, _index: CharsetIndex) {}
     fn configure_charset(&mut self, _index: CharsetIndex, _charset: StandardCharset) {}
+    fn set_mode(&mut self, _mode: Mode) {}
+    fn unset_mode(&mut self, _: Mode) {}
 }
 
 #[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
@@ -231,6 +296,22 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
                     attrs_from_sgr_parameters(&mut params.iter(), |attr| {
                         self.handler.terminal_attribute(attr);
                     });
+                }
+            }
+            ('h', intermediates) => {
+                for param in params.iter().map(|param| param[0]) {
+                    match Mode::from_primitive(intermediates.get(0), param) {
+                        Some(mode) => self.handler.set_mode(mode),
+                        None => log!("Unknown terminal mode: {:?}", params),
+                    }
+                }
+            }
+            ('l', intermediates) => {
+                for param in params.iter().map(|param| param[0]) {
+                    match Mode::from_primitive(intermediates.get(0), param) {
+                        Some(mode) => self.handler.unset_mode(mode),
+                        None => log!("Unknown terminal mode: {:?}", params),
+                    }
                 }
             }
             _ => log!("Unhandled csi_dispatch: CSI {params:?} {intermediates:?} {action:?}"),
