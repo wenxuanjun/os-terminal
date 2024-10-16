@@ -33,7 +33,7 @@ bitflags::bitflags! {
         const ALTERNATE_SCROLL = 1 << 16;
         const VI = 1 << 17;
         const URGENCY_HINTS = 1 << 18;
-        const ANY = core::u32::MAX;
+        const ANY = u32::MAX;
     }
 }
 
@@ -77,7 +77,7 @@ impl<D: DrawTarget> Terminal<D> {
                 mode: TerminalMode::default(),
                 attribute_template: Cell::default(),
                 buffer: TerminalBuffer::new(graphic),
-                keyboard: KeyboardManager::new(),
+                keyboard: KeyboardManager::default(),
             },
         }
     }

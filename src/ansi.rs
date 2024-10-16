@@ -165,7 +165,7 @@ impl<'a, H: Handler> Performer<'a, H> {
     }
 }
 
-impl<'a, H: Handler> Perform for Performer<'a, H> {
+impl<H: Handler> Perform for Performer<'_, H> {
     fn print(&mut self, content: char) {
         self.handler.input(content);
     }
@@ -300,7 +300,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             }
             ('h', intermediates) => {
                 for param in params.iter().map(|param| param[0]) {
-                    match Mode::from_primitive(intermediates.get(0), param) {
+                    match Mode::from_primitive(intermediates.first(), param) {
                         Some(mode) => self.handler.set_mode(mode),
                         None => log!("Unknown terminal mode: {:?}", params),
                     }
@@ -308,7 +308,7 @@ impl<'a, H: Handler> Perform for Performer<'a, H> {
             }
             ('l', intermediates) => {
                 for param in params.iter().map(|param| param[0]) {
-                    match Mode::from_primitive(intermediates.get(0), param) {
+                    match Mode::from_primitive(intermediates.first(), param) {
                         Some(mode) => self.handler.unset_mode(mode),
                         None => log!("Unknown terminal mode: {:?}", params),
                     }

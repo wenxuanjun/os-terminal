@@ -8,8 +8,8 @@ pub struct KeyboardManager {
     app_cursor_mode: bool,
 }
 
-impl KeyboardManager {
-    pub fn new() -> Self {
+impl Default for KeyboardManager {
+    fn default() -> Self {
         Self {
             keyboard: Keyboard::new(
                 ScancodeSet1::new(),
@@ -19,7 +19,9 @@ impl KeyboardManager {
             app_cursor_mode: false,
         }
     }
+}
 
+impl KeyboardManager {
     pub fn set_app_cursor(&mut self, mode: bool) {
         self.app_cursor_mode = mode;
     }

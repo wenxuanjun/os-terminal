@@ -31,7 +31,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
 }
 
 impl<D: DrawTarget> TextOnGraphic<D> {
-    pub const fn new(graphic: D) -> Self {
+    pub fn new(graphic: D) -> Self {
         Self {
             graphic,
             color_cache: BTreeMap::new(),

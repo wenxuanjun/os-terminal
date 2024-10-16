@@ -1,4 +1,5 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
+use core::{iter::Map, slice::Iter};
 
 #[cfg(feature = "bitmap")]
 mod bitmap;
@@ -40,10 +41,26 @@ pub enum Rasterized<'a> {
 }
 
 impl<'a> Rasterized<'a> {
-    pub fn as_2d_array(&'a self) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
+    pub fn as_2d_array(&'a self) -> RasterizedIter<'a> {
         match self {
-            Self::Slice(slice) => Box::new(slice.iter().copied()),
-            Self::Vec(vec) => Box::new(vec.iter().map(|row| row.as_slice())),
+            Self::Slice(slice) => RasterizedIter::Slice(slice.iter()),
+            Self::Vec(vec) => RasterizedIter::Vec(vec.iter().map(|row| row.as_slice())),
+        }
+    }
+}
+
+pub enum RasterizedIter<'a> {
+    Slice(Iter<'a, &'a [u8]>),
+    Vec(Map<Iter<'a, Vec<u8>>, fn(&'a Vec<u8>) -> &'a [u8]>),
+}
+
+impl<'a> Iterator for RasterizedIter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RasterizedIter::Slice(iter) => iter.next().copied(),
+            RasterizedIter::Vec(iter) => iter.next(),
         }
     }
 }
