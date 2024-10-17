@@ -9,7 +9,7 @@ macro_rules! log {
 }
 
 pub fn log_message(args: fmt::Arguments) {
-    if let Some(logger) = CONFIG.lock().logger {
+    if let Some(logger) = CONFIG.logger.lock().as_ref() {
         logger(args);
     }
 }

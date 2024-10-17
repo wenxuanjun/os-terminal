@@ -4,7 +4,7 @@ use core::mem::swap;
 use crate::cell::{Cell, Flags};
 use crate::color::Rgb888;
 use crate::config::CONFIG;
-use crate::font::ContentInfo;
+use crate::font::{ContentInfo, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
@@ -68,7 +68,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
             .entry((foreground, background))
             .or_insert_with(|| ColorCache::new(foreground, background));
 
-        if let Some(font_manager) = CONFIG.lock().font_manager.as_mut() {
+        if let Some(font_manager) = CONFIG.font_manager.lock().as_mut() {
             let (font_width, font_height) = font_manager.size();
             let (x_start, y_start) = (col * font_width, row * font_height);
 
@@ -79,15 +79,20 @@ impl<D: DrawTarget> TextOnGraphic<D> {
                 cell.width_ratio,
             );
 
-            for (y, lines) in font_manager
-                .rasterize(content_info)
-                .as_2d_array()
-                .enumerate()
-            {
-                for (x, &intensity) in lines.iter().enumerate() {
-                    let (r, g, b) = color_cache.colors[intensity as usize];
-                    self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
-                }
+            macro_rules! draw_raster {
+                ($raster:ident) => {
+                    for (y, lines) in $raster.iter().enumerate() {
+                        for (x, &intensity) in lines.iter().enumerate() {
+                            let (r, g, b) = color_cache.colors[intensity as usize];
+                            self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
+                        }
+                    }
+                };
+            }
+
+            match font_manager.rasterize(content_info) {
+                Rasterized::Slice(raster) => draw_raster!(raster),
+                Rasterized::Vec(raster) => draw_raster!(raster),
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {

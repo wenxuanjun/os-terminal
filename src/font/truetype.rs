@@ -47,47 +47,41 @@ impl FontManager for TrueTypeFont {
     }
 
     fn rasterize(&mut self, info: ContentInfo) -> Rasterized {
-        if let Some(bitmap) = self.bitmap_cache.get(&info) {
-            return Rasterized::Vec(bitmap.clone());
-        }
+        Rasterized::Vec(self.bitmap_cache.entry(info.clone()).or_insert_with(|| {
+            let select_font = if info.italic {
+                self.italic_font.as_mut().unwrap_or(&mut self.font)
+            } else {
+                &mut self.font
+            };
 
-        let select_font = if info.italic {
-            self.italic_font.as_mut().unwrap_or(&mut self.font)
-        } else {
-            &mut self.font
-        };
+            let font_weight = if info.bold { 700.0 } else { 400.0 };
+            select_font.set_variation(b"wght", font_weight);
 
-        let font_weight = if info.bold { 700.0 } else { 400.0 };
-        select_font.set_variation(b"wght", font_weight);
+            let glyph_id = select_font.glyph_id(info.content);
+            let glyph = glyph_id.with_scale(self.font_size);
 
-        let actual_width = self.raster_width * info.width_ratio;
+            let actual_width = self.raster_width * info.width_ratio;
+            let mut letter_bitmap = vec![vec![0u8; actual_width]; self.raster_height];
 
-        let glyph = select_font
-            .glyph_id(info.content)
-            .with_scale(self.font_size);
+            if let Some(bitmap) = select_font.outline_glyph(glyph) {
+                let px_bounds = bitmap.px_bounds();
 
-        let mut letter_bitmap = vec![vec![0u8; actual_width]; self.raster_height];
+                let x_offset = px_bounds.min.x as isize;
+                let y_offset = (self.base_line_offset + px_bounds.min.y) as isize;
 
-        if let Some(bitmap) = select_font.outline_glyph(glyph) {
-            let px_bounds = bitmap.px_bounds();
+                bitmap.draw(|x, y, c| {
+                    let x = x_offset + x as isize;
+                    let y = y_offset + y as isize;
 
-            let x_offset = px_bounds.min.x as isize;
-            let y_offset = (self.base_line_offset + px_bounds.min.y) as isize;
+                    if (x >= 0 && x < actual_width as isize)
+                        && (y >= 0 && y < self.raster_height as isize)
+                    {
+                        letter_bitmap[y as usize][x as usize] = (c * 255.0) as u8;
+                    }
+                });
+            }
 
-            bitmap.draw(|x, y, c| {
-                let x = x_offset + x as isize;
-                let y = y_offset + y as isize;
-
-                if (x >= 0 && x < actual_width as isize)
-                    && (y >= 0 && y < self.raster_height as isize)
-                {
-                    letter_bitmap[y as usize][x as usize] = (c * 255.0) as u8;
-                }
-            });
-        }
-
-        self.bitmap_cache.insert(info, letter_bitmap.clone());
-
-        Rasterized::Vec(letter_bitmap)
+            letter_bitmap
+        }))
     }
 }

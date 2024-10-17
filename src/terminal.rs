@@ -1,7 +1,7 @@
-use core::{cmp::min, fmt};
-
 use alloc::boxed::Box;
 use alloc::string::String;
+use core::sync::atomic::Ordering;
+use core::{cmp::min, fmt};
 
 use crate::ansi::{Attr, CursorShape, Handler, Mode, Performer};
 use crate::ansi::{LineClearMode, ScreenClearMode};
@@ -112,17 +112,17 @@ impl<D: DrawTarget> Terminal<D> {
 
 impl<D: DrawTarget> Terminal<D> {
     pub fn set_auto_flush(&mut self, auto_flush: bool) {
-        CONFIG.lock().auto_flush = auto_flush;
+        CONFIG.auto_flush.store(auto_flush, Ordering::Relaxed);
     }
 
     pub fn set_logger(&mut self, logger: Option<fn(fmt::Arguments)>) {
-        CONFIG.lock().logger = logger;
+        *CONFIG.logger.lock() = logger;
     }
 
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
-        CONFIG.lock().font_manager = Some(font_manager);
+        *CONFIG.font_manager.lock() = Some(font_manager);
     }
 }
 
