@@ -7,10 +7,11 @@ use crate::ansi::{Attr, CursorShape, Handler, Mode, Performer};
 use crate::ansi::{LineClearMode, ScreenClearMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
+use crate::color::ColorScheme;
 use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, TextOnGraphic};
-use crate::keyboard::KeyboardManager;
+use crate::keyboard::{KeyboardEvent, KeyboardManager};
 
 bitflags::bitflags! {
     pub struct TerminalMode: u32 {
@@ -94,10 +95,6 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.flush();
     }
 
-    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
-        self.inner.keyboard.handle_keyboard(scancode)
-    }
-
     pub fn advance_state(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
         let mut performer = Performer::new(&mut self.inner);
@@ -106,6 +103,17 @@ impl<D: DrawTarget> Terminal<D> {
         }
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
+        }
+    }
+
+    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
+        match self.inner.keyboard.handle_keyboard(scancode) {
+            KeyboardEvent::AnsiString(s) => Some(s),
+            KeyboardEvent::SetColorScheme(index) => {
+                self.set_color_scheme(index);
+                None
+            }
+            KeyboardEvent::None => None,
         }
     }
 }
@@ -123,6 +131,12 @@ impl<D: DrawTarget> Terminal<D> {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
         *CONFIG.font_manager.lock() = Some(font_manager);
+    }
+
+    pub fn set_color_scheme(&mut self, palette_index: usize) {
+        *CONFIG.color_scheme.lock() = ColorScheme::new(palette_index);
+        self.inner.attribute_template = Cell::default();
+        self.inner.buffer.flush_graphic();
     }
 }
 

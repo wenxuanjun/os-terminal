@@ -3,6 +3,12 @@ use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::{DecodedKey, KeyCode};
 use pc_keyboard::{HandleControl, Keyboard, ScancodeSet1};
 
+pub enum KeyboardEvent {
+    AnsiString(String),
+    SetColorScheme(usize),
+    None,
+}
+
 pub struct KeyboardManager {
     keyboard: Keyboard<Us104Key, ScancodeSet1>,
     app_cursor_mode: bool,
@@ -26,18 +32,34 @@ impl KeyboardManager {
         self.app_cursor_mode = mode;
     }
 
-    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
-        let key_event = self.keyboard.add_byte(scancode).ok().flatten()?;
-        let decoded_key = self.keyboard.process_keyevent(key_event)?;
-        Some(self.key_to_ansi_string(decoded_key))
+    pub fn handle_keyboard(&mut self, scancode: u8) -> KeyboardEvent {
+        if let Some(key_event) = self.keyboard.add_byte(scancode).ok().flatten() {
+            if let Some(decoded_key) = self.keyboard.process_keyevent(key_event) {
+                return self.key_to_ansi_string(decoded_key);
+            }
+        }
+        KeyboardEvent::None
     }
 }
 
 impl KeyboardManager {
     #[rustfmt::skip]
-    fn key_to_ansi_string(&self, key: DecodedKey) -> String {
+    fn key_to_ansi_string(&self, key: DecodedKey) -> KeyboardEvent {
         match key {
-            DecodedKey::Unicode(c) => c.to_string(),
+            DecodedKey::Unicode(c) => {
+                let modifiers = self.keyboard.get_modifiers();
+                if modifiers.is_ctrl() && modifiers.is_alt() {
+                    if c.is_ascii_digit() {
+                        let palette_index = if c == '0' {
+                            9
+                        } else {
+                            c.to_digit(10).unwrap() - 1
+                        };
+                        return KeyboardEvent::SetColorScheme(palette_index as usize);
+                    }
+                }
+                KeyboardEvent::AnsiString(c.to_string())
+            }
             DecodedKey::RawKey(key) => {
                 let sequence = match key {
                     KeyCode::F1 => "\x1bOP",
@@ -62,7 +84,7 @@ impl KeyboardManager {
                     KeyCode::PageDown => "\x1b[6~",
                     _ => "",
                 };
-                sequence.to_string()
+                KeyboardEvent::AnsiString(sequence.to_string())
             }
         }
     }

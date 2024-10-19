@@ -20,7 +20,7 @@ use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -35,7 +35,7 @@ fn main() {
         terminal.set_auto_flush(false);
         terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
 
-        let font_buffer = include_bytes!("SourceCodeVF.otf");
+        let font_buffer = include_bytes!("SourceHanMonoSC-Min.ttf");
         terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
 
         Arc::new(Mutex::new(terminal))
@@ -72,11 +72,16 @@ fn main() {
             close(slave.as_raw_fd()).unwrap();
             let master_raw_fd = master.as_raw_fd();
 
-            let (ansi_sender, ansi_receiver) = unbounded();
-            let mut app = App::new(ansi_sender, buffer.clone(), terminal.clone());
-
             let event_loop = EventLoop::new().unwrap();
             let redraw_event_proxy = event_loop.create_proxy();
+            let (ansi_sender, ansi_receiver) = unbounded();
+
+            let mut app = App::new(
+                ansi_sender,
+                buffer.clone(),
+                terminal.clone(),
+                redraw_event_proxy.clone(),
+            );
 
             std::thread::spawn(move || {
                 let mut temp = [0u8; 1024];
@@ -146,6 +151,7 @@ struct App {
     terminal: Arc<Mutex<Terminal<Display>>>,
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
+    redraw_event_proxy: EventLoopProxy<()>,
 }
 
 impl App {
@@ -153,6 +159,7 @@ impl App {
         ansi_sender: Sender<String>,
         buffer: Arc<Vec<AtomicU32>>,
         terminal: Arc<Mutex<Terminal<Display>>>,
+        redraw_event_proxy: EventLoopProxy<()>,
     ) -> Self {
         Self {
             ansi_sender,
@@ -160,6 +167,7 @@ impl App {
             terminal,
             window: None,
             surface: None,
+            redraw_event_proxy,
         }
     }
 }
@@ -246,6 +254,8 @@ impl ApplicationHandler for App {
                             {
                                 self.ansi_sender.send(ansi_string).unwrap();
                             }
+
+                            self.redraw_event_proxy.send_event(()).unwrap();
                         }
                     }
                 }

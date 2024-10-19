@@ -103,6 +103,17 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
     }
 
+    #[inline]
+    pub fn flush_graphic(&mut self) {
+        self.graphic.clear(Cell::default());
+        for (i, row) in self.buffer.iter().enumerate() {
+            for (j, &cell) in row.iter().enumerate() {
+                self.graphic.write(i, j, cell);
+            }
+        }
+    }
+
+    #[inline]
     pub fn new_line(&mut self, cell: Cell) {
         self.buffer.pop_front();
         self.buffer.push_back(vec![cell; self.width()]);

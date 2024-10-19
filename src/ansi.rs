@@ -352,7 +352,6 @@ impl<H: Handler> Perform for Performer<'_, H> {
             }
             (b'7', []) => self.handler.save_cursor_position(),
             (b'8', []) => self.handler.restore_cursor_position(),
-
             (b'=', []) => self.handler.set_keypad_application_mode(),
             (b'>', []) => self.handler.unset_keypad_application_mode(),
             _ => log!("Unhandled escape code: ESC {:?} {byte}", intermediates),

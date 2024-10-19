@@ -14,6 +14,7 @@ mod color;
 mod config;
 mod graphic;
 mod keyboard;
+mod palette;
 mod terminal;
 
 pub mod font;
