@@ -104,8 +104,11 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     #[inline]
-    pub fn flush_graphic(&mut self) {
-        self.graphic.clear(Cell::default());
+    pub fn full_flush(&mut self) {
+        self.buffer
+            .iter_mut()
+            .for_each(|row| row.iter_mut().for_each(|c| *c = c.reset_color()));
+
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 self.graphic.write(i, j, cell);

@@ -12,6 +12,7 @@ use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, TextOnGraphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
+use crate::palette::Palette;
 
 bitflags::bitflags! {
     pub struct TerminalMode: u32 {
@@ -136,7 +137,13 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_color_scheme(&mut self, palette_index: usize) {
         *CONFIG.color_scheme.lock() = ColorScheme::new(palette_index);
         self.inner.attribute_template = Cell::default();
-        self.inner.buffer.flush_graphic();
+        self.inner.buffer.full_flush();
+    }
+
+    pub fn set_custom_color_scheme(&mut self, palette: Palette) {
+        *CONFIG.color_scheme.lock() = ColorScheme::from_palette(&palette);
+        self.inner.attribute_template = Cell::default();
+        self.inner.buffer.full_flush();
     }
 }
 
@@ -237,7 +244,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn put_tab(&mut self) {
         let tab_stop = self.cursor.column.div_ceil(8) * 8;
         let end_column = tab_stop.min(self.buffer.width());
-        let template = self.attribute_template.reset();
+        let template = self.attribute_template.reset_content();
 
         while self.cursor.column < end_column {
             self.buffer
@@ -267,7 +274,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let start = self.cursor.column;
         let end = min(start + count, self.buffer.width());
 
-        let template = self.attribute_template.reset();
+        let template = self.attribute_template.reset_content();
         for column in start..end {
             self.buffer.write(self.cursor.row, column, template);
         }
@@ -277,7 +284,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let (row, columns) = (self.cursor.row, self.buffer.width());
         let count = min(count, columns - self.cursor.column - 1);
 
-        let template = self.attribute_template.reset();
+        let template = self.attribute_template.reset_content();
         for column in (self.cursor.column + count)..columns {
             self.buffer
                 .write(row, column - count, self.buffer.read(row, column));
@@ -303,14 +310,14 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             LineClearMode::Left => (0, self.cursor.column + 1),
             LineClearMode::All => (0, self.buffer.width()),
         };
-        let template = self.attribute_template.reset();
+        let template = self.attribute_template.reset_content();
         for column in start..end {
             self.buffer.write(self.cursor.row, column, template);
         }
     }
 
     fn clear_screen(&mut self, mode: ScreenClearMode) {
-        let template = self.attribute_template.reset();
+        let template = self.attribute_template.reset_content();
         match mode {
             ScreenClearMode::Above => {
                 for row in 0..self.cursor.row {

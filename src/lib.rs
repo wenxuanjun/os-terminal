@@ -22,4 +22,5 @@ pub mod font;
 pub use color::Rgb888;
 pub use graphic::DrawTarget;
 pub use keyboard::KeyboardManager;
+pub use palette::Palette;
 pub use terminal::Terminal;

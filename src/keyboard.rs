@@ -45,22 +45,30 @@ impl KeyboardManager {
 impl KeyboardManager {
     #[rustfmt::skip]
     fn key_to_ansi_string(&self, key: DecodedKey) -> KeyboardEvent {
+        let modifiers = self.keyboard.get_modifiers();
+
         match key {
             DecodedKey::Unicode(c) => {
-                let modifiers = self.keyboard.get_modifiers();
-                if modifiers.is_ctrl() && modifiers.is_alt() {
-                    if c.is_ascii_digit() {
-                        let palette_index = if c == '0' {
-                            9
-                        } else {
-                            c.to_digit(10).unwrap() - 1
-                        };
-                        return KeyboardEvent::SetColorScheme(palette_index as usize);
-                    }
-                }
                 KeyboardEvent::AnsiString(c.to_string())
             }
             DecodedKey::RawKey(key) => {
+                if modifiers.is_ctrl() && modifiers.is_shifted() {
+                    let palette_index = match key {
+                        KeyCode::F1 => Some(0),
+                        KeyCode::F2 => Some(1),
+                        KeyCode::F3 => Some(2),
+                        KeyCode::F4 => Some(3),
+                        KeyCode::F5 => Some(4),
+                        KeyCode::F6 => Some(5),
+                        KeyCode::F7 => Some(6),
+                        KeyCode::F8 => Some(7),
+                        _ => None,
+                    };
+                    if let Some(palette_index) = palette_index {
+                        return KeyboardEvent::SetColorScheme(palette_index as usize);
+                    }
+                }
+
                 let sequence = match key {
                     KeyCode::F1 => "\x1bOP",
                     KeyCode::F2 => "\x1bOQ",
@@ -84,6 +92,7 @@ impl KeyboardManager {
                     KeyCode::PageDown => "\x1b[6~",
                     _ => "",
                 };
+
                 KeyboardEvent::AnsiString(sequence.to_string())
             }
         }

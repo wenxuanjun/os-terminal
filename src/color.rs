@@ -1,5 +1,5 @@
 use crate::config::CONFIG;
-use crate::palette::{DEFAULT_PALETTE_INDEX, PALETTE_DATA};
+use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE_DATA};
 
 #[repr(u8)]
 #[derive(Debug)]
@@ -35,12 +35,16 @@ impl Color {
     pub fn to_rgb(self) -> Rgb888 {
         match self {
             Self::Rgb(rgb) => rgb,
-            Self::Indexed(idx) => CONFIG.color_scheme.lock().0[idx as usize],
+            Self::Indexed(idx) => CONFIG.color_scheme.lock().ansi_colors[idx as usize],
         }
     }
 }
 
-pub struct ColorScheme([Rgb888; 256]);
+pub struct ColorScheme {
+    pub foreground: Rgb888,
+    pub background: Rgb888,
+    pub ansi_colors: [Rgb888; 256],
+}
 
 impl Default for ColorScheme {
     fn default() -> Self {
@@ -50,12 +54,16 @@ impl Default for ColorScheme {
 
 impl ColorScheme {
     pub fn new(palette_index: usize) -> Self {
-        let mut colors = [(0, 0, 0); 256];
         let palette = PALETTE_DATA
             .get(palette_index)
             .unwrap_or(&PALETTE_DATA[DEFAULT_PALETTE_INDEX]);
 
-        for (i, color) in palette.iter().enumerate() {
+        Self::from_palette(palette)
+    }
+
+    pub fn from_palette(palette: &Palette) -> Self {
+        let mut colors = [(0, 0, 0); 256];
+        for (i, color) in palette.ansi_colors.iter().enumerate() {
             colors[i] = *color;
         }
 
@@ -75,6 +83,10 @@ impl ColorScheme {
             colors[index] = (color_value, color_value, color_value);
         }
 
-        Self(colors)
+        Self {
+            foreground: palette.foreground,
+            background: palette.background,
+            ansi_colors: colors,
+        }
     }
 }

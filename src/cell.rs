@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthChar;
 
-use super::color::{Color, NamedColor};
+use crate::{color::Color, config::CONFIG};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,13 +27,6 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn reset(&self) -> Self {
-        Self {
-            background: self.background,
-            ..Default::default()
-        }
-    }
-
     pub fn with_placeholder(&self) -> Self {
         Self {
             placeholder: true,
@@ -48,15 +41,39 @@ impl Cell {
             ..*self
         }
     }
+
+    pub fn reset_content(&self) -> Self {
+        Self {
+            background: self.background,
+            foreground: self.foreground,
+            ..Default::default()
+        }
+    }
+
+    pub fn reset_color(&mut self) -> Self {
+        let color_scheme = CONFIG.color_scheme.lock();
+
+        let update_color = |current_color, new_color| match current_color {
+            Color::Rgb(_) => Color::Rgb(new_color),
+            _ => current_color,
+        };
+
+        self.foreground = update_color(self.foreground, color_scheme.foreground);
+        self.background = update_color(self.background, color_scheme.background);
+
+        *self
+    }
 }
 
 impl Default for Cell {
     fn default() -> Self {
+        let color_scheme = CONFIG.color_scheme.lock();
+
         Self {
             content: ' ',
             flags: Flags::empty(),
-            foreground: Color::Indexed(NamedColor::BrightWhite as u8),
-            background: Color::Indexed(NamedColor::Black as u8),
+            foreground: Color::Rgb(color_scheme.foreground),
+            background: Color::Rgb(color_scheme.background),
             width_ratio: 1,
             placeholder: false,
         }
