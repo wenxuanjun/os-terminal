@@ -24,7 +24,7 @@ pub struct ContentInfo {
 }
 
 impl ContentInfo {
-    pub const fn new(content: char, bold: bool, italic: bool, width_ratio: usize) -> Self {
+    pub fn new(content: char, bold: bool, italic: bool, width_ratio: usize) -> Self {
         Self {
             content,
             bold,

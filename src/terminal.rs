@@ -84,11 +84,11 @@ impl<D: DrawTarget> Terminal<D> {
         }
     }
 
-    pub const fn rows(&self) -> usize {
+    pub fn rows(&self) -> usize {
         self.inner.buffer.height()
     }
 
-    pub const fn columns(&self) -> usize {
+    pub fn columns(&self) -> usize {
         self.inner.buffer.width()
     }
 
@@ -104,6 +104,9 @@ impl<D: DrawTarget> Terminal<D> {
         }
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
+        }
+        if CONFIG.auto_flush.load(Ordering::Relaxed) {
+            self.flush();
         }
     }
 

@@ -1,9 +1,7 @@
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
-use core::sync::atomic::Ordering;
 
 use super::cell::Cell;
-use super::config::CONFIG;
 use super::graphic::{DrawTarget, TextOnGraphic};
 
 const DEFAULT_SIZE: (usize, usize) = (1, 1);
@@ -72,11 +70,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
         let row = row % self.height();
         self.buffer[row][col] = cell;
-
-        if CONFIG.auto_flush.load(Ordering::Relaxed) {
-            self.graphic.write(row, col, cell);
-            self.flush_cache[row][col] = cell;
-        }
     }
 
     #[inline]
@@ -84,10 +77,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         self.buffer
             .iter_mut()
             .for_each(|row| row.iter_mut().for_each(|c| *c = cell));
-
-        if CONFIG.auto_flush.load(Ordering::Relaxed) {
-            self.flush();
-        }
     }
 
     #[inline]
@@ -120,9 +109,5 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn new_line(&mut self, cell: Cell) {
         self.buffer.pop_front();
         self.buffer.push_back(vec![cell; self.width()]);
-
-        if CONFIG.auto_flush.load(Ordering::Relaxed) {
-            self.flush();
-        }
     }
 }
