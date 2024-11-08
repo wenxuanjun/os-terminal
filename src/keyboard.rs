@@ -62,6 +62,8 @@ impl KeyboardManager {
                         KeyCode::F6 => Some(5),
                         KeyCode::F7 => Some(6),
                         KeyCode::F8 => Some(7),
+                        KeyCode::F9 => Some(8),
+                        KeyCode::F10 => Some(9),
                         _ => None,
                     };
                     if let Some(palette_index) = palette_index {
