@@ -1,18 +1,33 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use core::sync::atomic::Ordering;
+use core::time::Duration;
 use core::{cmp::min, fmt};
 
-use crate::ansi::{Attr, CursorShape, Handler, Mode, Performer};
-use crate::ansi::{LineClearMode, ScreenClearMode};
+use vte::ansi::{Attr, Color as AnsiColor, Rgb};
+use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
+use vte::ansi::{ClearMode, CursorShape, Processor, Timeout};
+use vte::ansi::{CursorStyle, Hyperlink, KeyboardModes};
+use vte::ansi::{Handler, LineClearMode, Mode, NamedPrivateMode, PrivateMode};
+
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
-use crate::color::ColorScheme;
+use crate::color::{Color, ColorScheme};
 use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, TextOnGraphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
 use crate::palette::Palette;
+
+#[derive(Default)]
+pub struct DummySyncHandler;
+
+#[rustfmt::skip]
+impl Timeout for DummySyncHandler {
+    fn set_timeout(&mut self, _duration: Duration) {}
+    fn clear_timeout(&mut self) {}
+    fn pending_timeout(&self) -> bool { false }
+}
 
 bitflags::bitflags! {
     pub struct TerminalMode: u32 {
@@ -53,7 +68,7 @@ struct Cursor {
 }
 
 pub struct Terminal<D: DrawTarget> {
-    parser: vte::Parser,
+    performer: Processor<DummySyncHandler>,
     inner: TerminalInner<D>,
 }
 
@@ -72,7 +87,7 @@ impl<D: DrawTarget> Terminal<D> {
         graphic.clear(Cell::default());
 
         Self {
-            parser: vte::Parser::new(),
+            performer: Processor::new(),
             inner: TerminalInner {
                 cursor: Cursor::default(),
                 saved_cursor: Cursor::default(),
@@ -84,11 +99,11 @@ impl<D: DrawTarget> Terminal<D> {
         }
     }
 
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.inner.buffer.height()
     }
 
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.inner.buffer.width()
     }
 
@@ -98,9 +113,8 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn advance_state(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        let mut performer = Performer::new(&mut self.inner);
         for &byte in bstr {
-            self.parser.advance(&mut performer, byte);
+            self.performer.advance(&mut self.inner, byte);
         }
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
@@ -111,14 +125,21 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
-        match self.inner.keyboard.handle_keyboard(scancode) {
-            KeyboardEvent::AnsiString(s) => Some(s),
-            KeyboardEvent::SetColorScheme(index) => {
-                self.set_color_scheme(index);
-                None
-            }
-            KeyboardEvent::None => None,
+        let event = self.inner.keyboard.handle_keyboard(scancode);
+
+        if let KeyboardEvent::AnsiString(s) = event {
+            return Some(s);
         }
+
+        match event {
+            KeyboardEvent::SetColorScheme(index) => self.set_color_scheme(index),
+            KeyboardEvent::ScrollUp => self.inner.scroll_history_up(1),
+            KeyboardEvent::ScrollDown => self.inner.scroll_history_down(1),
+            KeyboardEvent::ScrollPageUp => self.inner.scroll_history_up(self.rows()),
+            KeyboardEvent::ScrollPageDown => self.inner.scroll_history_down(self.rows()),
+            _ => {}
+        }
+        None
     }
 }
 
@@ -131,10 +152,18 @@ impl<D: DrawTarget> Terminal<D> {
         *CONFIG.logger.lock() = logger;
     }
 
+    pub fn set_bell_handler(&mut self, handler: Option<fn()>) {
+        *CONFIG.bell_handler.lock() = handler;
+    }
+
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
         *CONFIG.font_manager.lock() = Some(font_manager);
+    }
+    
+    pub fn set_history_size(&mut self, size: usize) {
+        self.inner.buffer.resize_history(size);
     }
 
     pub fn set_color_scheme(&mut self, palette_index: usize) {
@@ -168,6 +197,7 @@ impl<D: DrawTarget> TerminalInner<D> {
             CursorShape::Block => Flags::CURSOR_BLOCK,
             CursorShape::Underline => Flags::CURSOR_UNDERLINE,
             CursorShape::Beam => Flags::CURSOR_BEAM,
+            _ => return,
         };
 
         if enable {
@@ -175,15 +205,43 @@ impl<D: DrawTarget> TerminalInner<D> {
         } else {
             origin_cell.flags.remove(flag);
         }
+
         self.buffer.write(row, column, origin_cell);
+    }
+
+    fn scroll_history_up(&mut self, count: usize) {
+        log!("Scroll up with buffer: {}", count);
+        self.buffer.scroll_history_up(count);
+    }
+
+    fn scroll_history_down(&mut self, count: usize) {
+        log!("Scroll down with buffer: {}", count);
+        self.buffer.scroll_history_down(count);
     }
 }
 
 impl<D: DrawTarget> Handler for TerminalInner<D> {
+    fn set_title(&mut self, title: Option<String>) {
+        log!("Unhandled set_title: {:?}", title);
+    }
+
+    fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
+        log!("Unhandled set_cursor_style: {:?}", style);
+    }
+
+    fn set_cursor_shape(&mut self, shape: CursorShape) {
+        self.cursor.shape = shape;
+    }
+
     fn input(&mut self, content: char) {
         let template = self.attribute_template.with_content(content);
+        let target_width = if template.wide { 2 } else { 1 };
 
-        if self.cursor.column + template.width_ratio > self.buffer.width() {
+        if !self.buffer.is_latest() {
+            self.buffer.back_to_latest();
+        }
+
+        if self.cursor.column + target_width > self.buffer.width() {
             if !self.mode.contains(TerminalMode::LINE_WRAP) {
                 return;
             }
@@ -195,7 +253,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             .write(self.cursor.row, self.cursor.column, template);
         self.cursor.column += 1;
 
-        for _ in 0..(template.width_ratio - 1) {
+        if template.wide {
             self.buffer.write(
                 self.cursor.row,
                 self.cursor.column,
@@ -205,54 +263,90 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         }
     }
 
-    fn goto(&mut self, row: usize, col: usize) {
-        self.cursor.row = min(row, self.buffer.height());
+    fn goto(&mut self, row: i32, col: usize) {
+        log!("Goto: row={}, col={}", row, col);
+        self.cursor.row = min(row as usize, self.buffer.height());
         self.cursor.column = min(col, self.buffer.width());
     }
 
-    fn goto_line(&mut self, row: usize) {
+    fn goto_line(&mut self, row: i32) {
+        log!("Goto line: {}", row);
         self.goto(row, self.cursor.column);
     }
 
-    fn goto_column(&mut self, col: usize) {
-        self.goto(self.cursor.row, col);
+    fn goto_col(&mut self, col: usize) {
+        log!("Goto column: {}", col);
+        self.goto(self.cursor.row as i32, col);
+    }
+
+    fn insert_blank(&mut self, count: usize) {
+        log!("Insert blank: {}", count);
+        let (row, columns) = (self.cursor.row, self.buffer.width());
+        let count = min(count, columns - self.cursor.column);
+
+        let template = self.attribute_template.reset_content();
+        for column in (self.cursor.column..columns - count).rev() {
+            self.buffer
+                .write(row, column + count, self.buffer.read(row, column));
+            self.buffer.write(row, column, template);
+        }
     }
 
     fn move_up(&mut self, rows: usize) {
-        self.goto(self.cursor.row.saturating_sub(rows), self.cursor.column);
+        log!("Move up: {}", rows);
+        self.goto(
+            self.cursor.row.saturating_sub(rows) as i32,
+            self.cursor.column,
+        );
     }
 
     fn move_down(&mut self, rows: usize) {
+        log!("Move down: {}", rows);
         let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as _;
         self.goto(goto_line, self.cursor.column);
     }
 
+    fn identify_terminal(&mut self, intermediate: Option<char>) {
+        log!("Unhandled identify_terminal: {:?}", intermediate);
+    }
+
+    fn device_status(&mut self, status: usize) {
+        log!("Unhandled device_status: {}", status);
+    }
+
     fn move_forward(&mut self, cols: usize) {
+        log!("Move forward: {}", cols);
         self.cursor.column = min(self.cursor.column + cols, self.buffer.width() - 1);
     }
 
     fn move_backward(&mut self, cols: usize) {
+        log!("Move backward: {}", cols);
         self.cursor.column = self.cursor.column.saturating_sub(cols);
     }
 
     fn move_up_and_cr(&mut self, rows: usize) {
-        self.goto(self.cursor.row.saturating_sub(rows), 0);
+        log!("Move up and cr: {}", rows);
+        self.goto(self.cursor.row.saturating_sub(rows) as i32, 0);
     }
 
     fn move_down_and_cr(&mut self, rows: usize) {
-        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as _;
-        self.goto(goto_line, 0);
+        log!("Move down and cr: {}", rows);
+        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1);
+        self.goto(goto_line as i32, 0);
     }
 
-    fn put_tab(&mut self) {
-        let tab_stop = self.cursor.column.div_ceil(8) * 8;
-        let end_column = tab_stop.min(self.buffer.width());
-        let template = self.attribute_template.reset_content();
+    fn put_tab(&mut self, count: u16) {
+        log!("Put tab: {}", count);
+        for _ in 0..count {
+            let tab_stop = self.cursor.column.div_ceil(8) * 8;
+            let end_column = tab_stop.min(self.buffer.width());
+            let template = self.attribute_template.reset_content();
 
-        while self.cursor.column < end_column {
-            self.buffer
-                .write(self.cursor.row, self.cursor.column, template);
-            self.cursor.column += 1;
+            while self.cursor.column < end_column {
+                self.buffer
+                    .write(self.cursor.row, self.cursor.column, template);
+                self.cursor.column += 1;
+            }
         }
     }
 
@@ -273,7 +367,44 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         }
     }
 
+    fn bell(&mut self) {
+        if let Some(handler) = CONFIG.bell_handler.lock().as_ref() {
+            handler();
+        }
+    }
+
+    fn substitute(&mut self) {
+        log!("Unhandled substitute!");
+    }
+
+    fn newline(&mut self) {
+        log!("Unhandled newline!");
+    }
+
+    fn set_horizontal_tabstop(&mut self) {
+        log!("Unhandled set_horizontal_tabstop!");
+    }
+
+    fn scroll_up(&mut self, count: usize) {
+        log!("Scroll up: {}", count);
+        self.buffer.scroll_up(count, self.attribute_template);
+    }
+
+    fn scroll_down(&mut self, count: usize) {
+        log!("Scroll down: {}", count);
+        self.buffer.scroll_down(count, self.attribute_template);
+    }
+
+    fn insert_blank_lines(&mut self, count: usize) {
+        log!("Unhandled insert blank lines: {}", count);
+    }
+
+    fn delete_lines(&mut self, count: usize) {
+        log!("Unhandled delete lines: {}", count);
+    }
+
     fn erase_chars(&mut self, count: usize) {
+        log!("Erase chars: {}", count);
         let start = self.cursor.column;
         let end = min(start + count, self.buffer.width());
 
@@ -284,6 +415,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn delete_chars(&mut self, count: usize) {
+        log!("Delete chars: {}", count);
         let (row, columns) = (self.cursor.row, self.buffer.width());
         let count = min(count, columns - self.cursor.column - 1);
 
@@ -295,6 +427,14 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         }
     }
 
+    fn move_backward_tabs(&mut self, count: u16) {
+        log!("Unhandled move backward tabs: {}", count);
+    }
+
+    fn move_forward_tabs(&mut self, count: u16) {
+        log!("Unhandled move forward tabs: {}", count);
+    }
+
     fn save_cursor_position(&mut self) {
         self.saved_cursor = self.cursor;
     }
@@ -303,36 +443,41 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         self.cursor = self.saved_cursor;
     }
 
-    fn set_cursor_shape(&mut self, shape: CursorShape) {
-        self.cursor.shape = shape;
-    }
-
     fn clear_line(&mut self, mode: LineClearMode) {
-        let (start, end) = match mode {
-            LineClearMode::Right => (self.cursor.column, self.buffer.width()),
-            LineClearMode::Left => (0, self.cursor.column + 1),
-            LineClearMode::All => (0, self.buffer.width()),
-        };
         let template = self.attribute_template.reset_content();
-        for column in start..end {
-            self.buffer.write(self.cursor.row, column, template);
+        match mode {
+            LineClearMode::Right => {
+                for column in self.cursor.column..self.buffer.width() {
+                    self.buffer.write(self.cursor.row, column, template);
+                }
+            }
+            LineClearMode::Left => {
+                for column in 0..=self.cursor.column {
+                    self.buffer.write(self.cursor.row, column, template);
+                }
+            }
+            LineClearMode::All => {
+                for column in 0..self.buffer.width() {
+                    self.buffer.write(self.cursor.row, column, template);
+                }
+            }
         }
     }
 
-    fn clear_screen(&mut self, mode: ScreenClearMode) {
+    fn clear_screen(&mut self, mode: ClearMode) {
         let template = self.attribute_template.reset_content();
         match mode {
-            ScreenClearMode::Above => {
+            ClearMode::Above => {
                 for row in 0..self.cursor.row {
                     for column in 0..self.buffer.width() {
                         self.buffer.write(row, column, template);
                     }
                 }
-                for column in 0..self.cursor.column {
+                for column in 0..=self.cursor.column {
                     self.buffer.write(self.cursor.row, column, template);
                 }
             }
-            ScreenClearMode::Below => {
+            ClearMode::Below => {
                 for column in self.cursor.column..self.buffer.width() {
                     self.buffer.write(self.cursor.row, column, template);
                 }
@@ -342,18 +487,45 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                     }
                 }
             }
-            ScreenClearMode::All => {
+            ClearMode::All => {
                 self.buffer.clear(template);
                 self.cursor = Cursor::default();
             }
-            _ => {}
+            ClearMode::Saved => {
+                self.buffer.clear(template);
+                self.cursor = Cursor::default();
+                self.buffer.clear_history();
+            }
+        }
+    }
+
+    fn clear_tabs(&mut self, mode: TabulationClearMode) {
+        log!("Unhandled clear tabs: {:?}", mode);
+    }
+
+    fn reset_state(&mut self) {
+        log!("Unhandled reset_state!");
+    }
+
+    fn reverse_index(&mut self) {
+        log!("Unhandled reverse_index!");
+        if self.cursor.row > 0 {
+            self.cursor.row -= 1;
+        } else {
+            self.scroll_down(1);
         }
     }
 
     fn terminal_attribute(&mut self, attr: Attr) {
+        let handle_color = |color: AnsiColor| match color {
+            AnsiColor::Named(color) => Color::Indexed(color as u16),
+            AnsiColor::Spec(color) => Color::Rgb((color.r, color.g, color.b)),
+            AnsiColor::Indexed(index) => Color::Indexed(index as u16),
+        };
+
         match attr {
-            Attr::Foreground(color) => self.attribute_template.foreground = color,
-            Attr::Background(color) => self.attribute_template.background = color,
+            Attr::Foreground(color) => self.attribute_template.foreground = handle_color(color),
+            Attr::Background(color) => self.attribute_template.background = handle_color(color),
             Attr::Reset => self.attribute_template = Cell::default(),
             Attr::Reverse => self.attribute_template.flags |= Flags::INVERSE,
             Attr::CancelReverse => self.attribute_template.flags.remove(Flags::INVERSE),
@@ -366,31 +538,150 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             Attr::CancelUnderline => self.attribute_template.flags.remove(Flags::UNDERLINE),
             Attr::Hidden => self.attribute_template.flags.insert(Flags::HIDDEN),
             Attr::CancelHidden => self.attribute_template.flags.remove(Flags::HIDDEN),
+            _ => log!("Unhandled terminal attribute: {:?}", attr),
         }
     }
 
     fn set_mode(&mut self, mode: Mode) {
+        log!("Unhandled set mode: {:?}", mode);
+    }
+
+    fn unset_mode(&mut self, mode: Mode) {
+        log!("Unhandled unset mode: {:?}", mode);
+    }
+
+    fn report_mode(&mut self, mode: Mode) {
+        log!("Unhandled report mode: {:?}", mode);
+    }
+
+    fn set_private_mode(&mut self, mode: PrivateMode) {
+        let mode = match mode {
+            PrivateMode::Named(mode) => mode,
+            PrivateMode::Unknown(mode) => {
+                log!("Ignoring unknown mode {} in set_private_mode", mode);
+                return;
+            }
+        };
+
         match mode {
-            Mode::ShowCursor => self.mode.insert(TerminalMode::SHOW_CURSOR),
-            Mode::CursorKeys => {
+            NamedPrivateMode::ShowCursor => self.mode.insert(TerminalMode::SHOW_CURSOR),
+            NamedPrivateMode::CursorKeys => {
                 self.mode.insert(TerminalMode::APP_CURSOR);
                 self.keyboard.set_app_cursor(true);
             }
-            Mode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
+            NamedPrivateMode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
             _ => log!("Unhandled set mode: {:?}", mode),
         }
     }
 
-    #[inline]
-    fn unset_mode(&mut self, mode: Mode) {
+    fn unset_private_mode(&mut self, mode: PrivateMode) {
+        let mode = match mode {
+            PrivateMode::Named(mode) => mode,
+            PrivateMode::Unknown(mode) => {
+                log!("Ignoring unknown mode {} in unset_private_mode", mode);
+                return;
+            }
+        };
+
         match mode {
-            Mode::ShowCursor => self.mode.remove(TerminalMode::SHOW_CURSOR),
-            Mode::CursorKeys => {
+            NamedPrivateMode::ShowCursor => self.mode.remove(TerminalMode::SHOW_CURSOR),
+            NamedPrivateMode::CursorKeys => {
                 self.mode.remove(TerminalMode::APP_CURSOR);
                 self.keyboard.set_app_cursor(false);
             }
-            Mode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
+            NamedPrivateMode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
             _ => log!("Unhandled unset mode: {:?}", mode),
         }
+    }
+
+    fn report_private_mode(&mut self, mode: PrivateMode) {
+        log!("Unhandled report private mode: {:?}", mode);
+    }
+
+    fn set_scrolling_region(&mut self, top: usize, bottom: Option<usize>) {
+        log!(
+            "Unhandled set scrolling region: top={}, bottom={:?}",
+            top,
+            bottom
+        );
+    }
+
+    fn set_keypad_application_mode(&mut self) {
+        log!("Set keypad application mode");
+        self.mode.insert(TerminalMode::APP_KEYPAD);
+    }
+
+    fn unset_keypad_application_mode(&mut self) {
+        log!("Unset keypad application mode");
+        self.mode.remove(TerminalMode::APP_KEYPAD);
+    }
+
+    fn set_active_charset(&mut self, index: CharsetIndex) {
+        log!("Unhandled set active charset: {:?}", index);
+    }
+
+    fn configure_charset(&mut self, index: CharsetIndex, charset: StandardCharset) {
+        log!("Unhandled configure charset: {:?}, {:?}", index, charset);
+    }
+
+    fn set_color(&mut self, index: usize, color: Rgb) {
+        log!("Unhandled set color: {}, {:?}", index, color);
+    }
+
+    fn dynamic_color_sequence(&mut self, prefix: String, index: usize, terminator: &str) {
+        log!(
+            "Unhandled dynamic color sequence: {}, {}, {}",
+            prefix,
+            index,
+            terminator
+        );
+    }
+
+    fn reset_color(&mut self, index: usize) {
+        log!("Unhandled reset color: {}", index);
+    }
+
+    fn clipboard_store(&mut self, clipboard: u8, base64: &[u8]) {
+        log!("Unhandled clipboard store: {}, {:?}", clipboard, base64);
+    }
+
+    fn clipboard_load(&mut self, clipboard: u8, terminator: &str) {
+        log!("Unhandled clipboard load: {}, {}", clipboard, terminator);
+    }
+
+    fn decaln(&mut self) {
+        log!("Unhandled decaln!");
+    }
+
+    fn push_title(&mut self) {
+        log!("Unhandled push title!");
+    }
+
+    fn pop_title(&mut self) {
+        log!("Unhandled pop title!");
+    }
+
+    fn text_area_size_pixels(&mut self) {
+        log!("Unhandled text area size pixels!");
+    }
+
+    fn text_area_size_chars(&mut self) {
+        log!("Unhandled text area size chars!");
+    }
+
+    fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
+        log!("Unhandled set hyperlink: {:?}", hyperlink);
+    }
+
+    fn report_keyboard_mode(&mut self) {
+        log!("Unhandled report keyboard mode!");
+    }
+
+    fn push_keyboard_mode(&mut self, mode: KeyboardModes) {
+        log!("Unhandled push keyboard mode: {:?}", mode);
+    }
+
+    fn pop_keyboard_modes(&mut self, to_pop: u16) {
+        log!("Unhandled pop keyboard modes: {}", to_pop);
     }
 }

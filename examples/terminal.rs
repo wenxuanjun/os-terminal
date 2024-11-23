@@ -14,7 +14,7 @@ use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
 use os_terminal::font::TrueTypeFont;
-use os_terminal::{DrawTarget, Rgb888, Terminal};
+use os_terminal::{DrawTarget, Rgb, Terminal};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
@@ -35,8 +35,9 @@ fn main() {
         terminal.set_auto_flush(false);
         terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
 
-        let font_buffer = include_bytes!("SourceHanMonoSC-Min.ttf");
+        let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
         terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
+        terminal.set_history_size(1000);
 
         Arc::new(Mutex::new(terminal))
     };
@@ -139,7 +140,7 @@ impl DrawTarget for Display {
     }
 
     #[inline(always)]
-    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
         self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
     }
@@ -215,14 +216,10 @@ impl ApplicationHandler for App {
                     let surface = self.surface.as_mut().unwrap();
                     self.terminal.lock().unwrap().flush();
 
-                    let buffer = self
-                        .buffer
-                        .iter()
-                        .map(|pixel| pixel.load(Ordering::Relaxed))
-                        .collect::<Vec<_>>();
-
                     let mut surface_buffer = surface.buffer_mut().unwrap();
-                    surface_buffer.copy_from_slice(&buffer[..]);
+                    for (index, value) in self.buffer.iter().enumerate() {
+                        surface_buffer[index] = value.load(Ordering::Relaxed);
+                    }
                     surface_buffer.present().unwrap();
                 }
             }

@@ -20,16 +20,16 @@ pub struct ContentInfo {
     content: char,
     bold: bool,
     italic: bool,
-    width_ratio: usize,
+    wide: bool,
 }
 
 impl ContentInfo {
-    pub fn new(content: char, bold: bool, italic: bool, width_ratio: usize) -> Self {
+    pub fn new(content: char, bold: bool, italic: bool, wide: bool) -> Self {
         Self {
             content,
             bold,
             italic,
-            width_ratio,
+            wide,
         }
     }
 }

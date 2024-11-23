@@ -6,6 +6,10 @@ use pc_keyboard::{HandleControl, Keyboard, ScancodeSet1};
 pub enum KeyboardEvent {
     AnsiString(String),
     SetColorScheme(usize),
+    ScrollUp,
+    ScrollDown,
+    ScrollPageUp,
+    ScrollPageDown,
     None,
 }
 
@@ -62,12 +66,20 @@ impl KeyboardManager {
                         KeyCode::F6 => Some(5),
                         KeyCode::F7 => Some(6),
                         KeyCode::F8 => Some(7),
-                        KeyCode::F9 => Some(8),
-                        KeyCode::F10 => Some(9),
                         _ => None,
                     };
                     if let Some(palette_index) = palette_index {
                         return KeyboardEvent::SetColorScheme(palette_index as usize);
+                    }
+                }
+
+                if modifiers.is_ctrl() && modifiers.is_alt() {
+                    match key {
+                        KeyCode::ArrowUp => return KeyboardEvent::ScrollUp,
+                        KeyCode::ArrowDown => return KeyboardEvent::ScrollDown,
+                        KeyCode::PageUp => return KeyboardEvent::ScrollPageUp,
+                        KeyCode::PageDown => return KeyboardEvent::ScrollPageDown,
+                        _ => {}
                     }
                 }
 
@@ -95,7 +107,10 @@ impl KeyboardManager {
                     _ => "",
                 };
 
-                KeyboardEvent::AnsiString(sequence.to_string())
+                match sequence {
+                    "" => KeyboardEvent::None,
+                    _ => KeyboardEvent::AnsiString(sequence.to_string()),
+                }
             }
         }
     }

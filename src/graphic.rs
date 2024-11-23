@@ -2,16 +2,16 @@ use alloc::collections::btree_map::BTreeMap;
 use core::mem::swap;
 
 use crate::cell::{Cell, Flags};
-use crate::color::Rgb888;
+use crate::color::Rgb;
 use crate::config::CONFIG;
 use crate::font::{ContentInfo, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
-    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888);
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb);
 }
 
-type FgBgPair = (Rgb888, Rgb888);
+pub type FgBgPair = (Rgb, Rgb);
 
 pub struct TextOnGraphic<D: DrawTarget> {
     graphic: D,
@@ -76,7 +76,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
                 cell.content,
                 cell.flags.contains(Flags::BOLD),
                 cell.flags.contains(Flags::ITALIC),
-                cell.width_ratio,
+                cell.wide,
             );
 
             macro_rules! draw_raster {
@@ -115,11 +115,11 @@ impl<D: DrawTarget> TextOnGraphic<D> {
 }
 
 struct ColorCache {
-    colors: [Rgb888; 256],
+    colors: [Rgb; 256],
 }
 
 impl ColorCache {
-    fn new(foreground: Rgb888, background: Rgb888) -> Self {
+    fn new(foreground: Rgb, background: Rgb) -> Self {
         let r_diff = foreground.0 as i32 - background.0 as i32;
         let g_diff = foreground.1 as i32 - background.1 as i32;
         let b_diff = foreground.2 as i32 - background.2 as i32;

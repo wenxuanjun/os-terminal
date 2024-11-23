@@ -19,11 +19,11 @@ bitflags::bitflags! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub content: char,
+    pub wide: bool,
+    pub placeholder: bool,
     pub flags: Flags,
     pub foreground: Color,
     pub background: Color,
-    pub width_ratio: usize,
-    pub placeholder: bool,
 }
 
 impl Cell {
@@ -37,7 +37,7 @@ impl Cell {
     pub fn with_content(&self, content: char) -> Self {
         Self {
             content,
-            width_ratio: content.width().unwrap(),
+            wide: content.width().unwrap_or(0) > 1,
             ..*self
         }
     }
@@ -51,15 +51,14 @@ impl Cell {
     }
 
     pub fn reset_color(&mut self) -> Self {
-        let color_scheme = CONFIG.color_scheme.lock();
+        let color_pair = CONFIG.color_scheme.lock().color_pair;
 
-        let update_color = |current_color, new_color| match current_color {
-            Color::Rgb(_) => Color::Rgb(new_color),
-            _ => current_color,
-        };
-
-        self.foreground = update_color(self.foreground, color_scheme.foreground);
-        self.background = update_color(self.background, color_scheme.background);
+        if let Color::Rgb(_) = self.foreground {
+            self.foreground = Color::Rgb(color_pair.0);
+        }
+        if let Color::Rgb(_) = self.background {
+            self.background = Color::Rgb(color_pair.1);
+        }
 
         *self
     }
@@ -71,11 +70,11 @@ impl Default for Cell {
 
         Self {
             content: ' ',
-            flags: Flags::empty(),
-            foreground: Color::Rgb(color_scheme.foreground),
-            background: Color::Rgb(color_scheme.background),
-            width_ratio: 1,
+            wide: false,
             placeholder: false,
+            flags: Flags::empty(),
+            foreground: Color::Rgb(color_scheme.color_pair.0),
+            background: Color::Rgb(color_scheme.color_pair.1),
         }
     }
 }

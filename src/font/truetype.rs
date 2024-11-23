@@ -60,7 +60,7 @@ impl FontManager for TrueTypeFont {
             let glyph_id = select_font.glyph_id(info.content);
             let glyph = glyph_id.with_scale(self.font_size);
 
-            let actual_width = self.raster_width * info.width_ratio;
+            let actual_width = self.raster_width * if info.wide { 2 } else { 1 };
             let mut letter_bitmap = vec![vec![0u8; actual_width]; self.raster_height];
 
             if let Some(bitmap) = select_font.outline_glyph(glyph) {

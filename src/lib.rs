@@ -7,7 +7,6 @@ extern crate alloc;
 #[macro_use]
 mod log;
 
-mod ansi;
 mod buffer;
 mod cell;
 mod color;
@@ -19,7 +18,7 @@ mod terminal;
 
 pub mod font;
 
-pub use color::Rgb888;
+pub use color::Rgb;
 pub use graphic::DrawTarget;
 pub use keyboard::KeyboardManager;
 pub use palette::Palette;

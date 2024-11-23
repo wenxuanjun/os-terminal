@@ -1,4 +1,5 @@
 use crate::config::CONFIG;
+use crate::graphic::FgBgPair;
 use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE_DATA};
 
 #[repr(u8)]
@@ -23,27 +24,33 @@ pub enum NamedColor {
     BrightWhite,
 }
 
-pub type Rgb888 = (u8, u8, u8);
+pub type Rgb = (u8, u8, u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
-    Indexed(u8),
-    Rgb(Rgb888),
+    Indexed(u16),
+    Rgb(Rgb),
 }
 
 impl Color {
-    pub fn to_rgb(self) -> Rgb888 {
+    pub fn to_rgb(self) -> Rgb {
         match self {
             Self::Rgb(rgb) => rgb,
-            Self::Indexed(idx) => CONFIG.color_scheme.lock().ansi_colors[idx as usize],
+            Self::Indexed(index) => {
+                let color_scheme = CONFIG.color_scheme.lock();
+                match index {
+                    256 => color_scheme.color_pair.0,
+                    257 => color_scheme.color_pair.1,
+                    index => color_scheme.ansi_colors[index as usize],
+                }
+            }
         }
     }
 }
 
 pub struct ColorScheme {
-    pub foreground: Rgb888,
-    pub background: Rgb888,
-    pub ansi_colors: [Rgb888; 256],
+    pub color_pair: FgBgPair,
+    pub ansi_colors: [Rgb; 256],
 }
 
 impl Default for ColorScheme {
@@ -57,24 +64,19 @@ impl ColorScheme {
         let palette = PALETTE_DATA
             .get(palette_index)
             .unwrap_or(&PALETTE_DATA[DEFAULT_PALETTE_INDEX]);
-
         Self::from_palette(palette)
     }
 
     pub fn from_palette(palette: &Palette) -> Self {
         let mut colors = [(0, 0, 0); 256];
-        for (i, color) in palette.ansi_colors.iter().enumerate() {
-            colors[i] = *color;
-        }
+        colors[..16].copy_from_slice(&palette.ansi_colors);
 
-        for r_level in 0..6 {
-            for g_level in 0..6 {
-                for b_level in 0..6 {
-                    let index = 16 + 36 * r_level + 6 * g_level + b_level;
-                    let scale = |c: usize| if c == 0 { 0 } else { (c * 40 + 55) as u8 };
-                    colors[index] = (scale(r_level), scale(g_level), scale(b_level));
-                }
-            }
+        for index in 0..216 {
+            let r = index / 36;
+            let g = (index % 36) / 6;
+            let b = index % 6;
+            let scale = |c: usize| if c == 0 { 0 } else { (c * 40 + 55) as u8 };
+            colors[index + 16] = (scale(r), scale(g), scale(b));
         }
 
         for gray_level in 0..24 {
@@ -84,8 +86,7 @@ impl ColorScheme {
         }
 
         Self {
-            foreground: palette.foreground,
-            background: palette.background,
+            color_pair: palette.color_pair,
             ansi_colors: colors,
         }
     }

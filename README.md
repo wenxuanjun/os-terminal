@@ -24,7 +24,7 @@ Create a display wrapper to wrap your framebuffer and implement the `DrawTarget`
 
 ```rust
 use alloc::boxed::Box;
-use os_terminal::{DrawTarget, Rgb888, Terminal};
+use os_terminal::{DrawTarget, Rgb, Terminal};
 use os_terminal::font::BitmapFont;
 
 struct Display {
@@ -39,7 +39,7 @@ impl DrawTarget for Display {
     }
 
     #[inline(always)]
-    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb888) {
+    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb) {
         let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
         self.buffer[y * self.width + x] = value;
     }
@@ -61,7 +61,7 @@ let scancodes = [0x1d, 0x2e, 0xae, 0x9d];
 
 for scancode in scancodes.iter() {
     if let Some(ansi_string) = terminal.handle_keyboard(*scancode) {
-        // Pass the ansi_string to your shell (Some("") Some("\u{3}") None None)
+        // Pass the ansi_string to your shell (None Some("\u{3}") None None)
     }
 }
 ```
@@ -103,6 +103,33 @@ Default flush strategy is synchronous. If you need higher performance, you can d
 terminal.set_auto_flush(false);
 terminal.flush();
 ```
+
+The terminal comes with 8 built-in themes. You can switch to other themes manually by calling `terminal.set_color_scheme(index)`.
+
+Custom theme is also supported:
+
+```rust
+let palette = Palette {
+    color_pair: (...),
+    ansi_colors: [...],
+}
+
+terminal.set_custom_color_scheme(palette);
+```
+
+> Note that this setting is temporary and you will need to re-execute `set_custom_color_scheme` if you switch to another theme.
+
+Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
+
+You can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
+
+## Shortcuts
+
+With `handle_keyboard`, some shortcuts are supported:
+
+- `Ctrl + Shift + F1-F8`: Switch to different built-in themes
+- `Ctrl + Alt + ArrowUp/ArrowDown`: Scroll up/down history
+- `Ctrl + Alt + PageUp/PageDown`: Scroll up/down history by page
 
 ## Features
 
