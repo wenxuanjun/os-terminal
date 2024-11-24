@@ -1,7 +1,8 @@
 use alloc::string::{String, ToString};
 use pc_keyboard::layouts::Us104Key;
-use pc_keyboard::{DecodedKey, KeyCode};
-use pc_keyboard::{HandleControl, Keyboard, ScancodeSet1};
+use pc_keyboard::KeyCode::{self, *};
+use pc_keyboard::{DecodedKey, Keyboard};
+use pc_keyboard::{HandleControl, ScancodeSet1};
 
 pub enum KeyboardEvent {
     AnsiString(String),
@@ -14,19 +15,21 @@ pub enum KeyboardEvent {
 }
 
 pub struct KeyboardManager {
-    keyboard: Keyboard<Us104Key, ScancodeSet1>,
     app_cursor_mode: bool,
+    natural_scroll: bool,
+    keyboard: Keyboard<Us104Key, ScancodeSet1>,
 }
 
 impl Default for KeyboardManager {
     fn default() -> Self {
         Self {
+            app_cursor_mode: false,
+            natural_scroll: true,
             keyboard: Keyboard::new(
                 ScancodeSet1::new(),
                 Us104Key,
                 HandleControl::MapLettersToUnicode,
             ),
-            app_cursor_mode: false,
         }
     }
 }
@@ -34,6 +37,10 @@ impl Default for KeyboardManager {
 impl KeyboardManager {
     pub fn set_app_cursor(&mut self, mode: bool) {
         self.app_cursor_mode = mode;
+    }
+
+    pub fn set_natural_scroll(&mut self, mode: bool) {
+        self.natural_scroll = mode;
     }
 
     pub fn handle_keyboard(&mut self, scancode: u8) -> KeyboardEvent {
@@ -57,6 +64,14 @@ impl KeyboardManager {
             }
             DecodedKey::RawKey(key) => {
                 if modifiers.is_ctrl() && modifiers.is_shifted() {
+                    match (key, self.natural_scroll) {
+                        (ArrowUp, true) | (ArrowDown, false) => return KeyboardEvent::ScrollUp,
+                        (ArrowUp, false) | (ArrowDown, true) => return KeyboardEvent::ScrollDown,
+                        (PageUp, _) => return KeyboardEvent::ScrollPageUp,
+                        (PageDown, _) => return KeyboardEvent::ScrollPageDown,
+                        _ => {},
+                    };
+
                     let palette_index = match key {
                         KeyCode::F1 => Some(0),
                         KeyCode::F2 => Some(1),
@@ -73,37 +88,27 @@ impl KeyboardManager {
                     }
                 }
 
-                if modifiers.is_ctrl() && modifiers.is_alt() {
-                    match key {
-                        KeyCode::ArrowUp => return KeyboardEvent::ScrollUp,
-                        KeyCode::ArrowDown => return KeyboardEvent::ScrollDown,
-                        KeyCode::PageUp => return KeyboardEvent::ScrollPageUp,
-                        KeyCode::PageDown => return KeyboardEvent::ScrollPageDown,
-                        _ => {}
-                    }
-                }
-
                 let sequence = match key {
-                    KeyCode::F1 => "\x1bOP",
-                    KeyCode::F2 => "\x1bOQ",
-                    KeyCode::F3 => "\x1bOR",
-                    KeyCode::F4 => "\x1bOS",
-                    KeyCode::F5 => "\x1b[15~",
-                    KeyCode::F6 => "\x1b[17~",
-                    KeyCode::F7 => "\x1b[18~",
-                    KeyCode::F8 => "\x1b[19~",
-                    KeyCode::F9 => "\x1b[20~",
-                    KeyCode::F10 => "\x1b[21~",
-                    KeyCode::F11 => "\x1b[23~",
-                    KeyCode::F12 => "\x1b[24~",
-                    KeyCode::ArrowUp => if self.app_cursor_mode { "\x1bOA" } else { "\x1b[A" },
-                    KeyCode::ArrowDown => if self.app_cursor_mode { "\x1bOB" } else { "\x1b[B" },
-                    KeyCode::ArrowRight => if self.app_cursor_mode { "\x1bOC" } else { "\x1b[C" },
-                    KeyCode::ArrowLeft => if self.app_cursor_mode { "\x1bOD" } else { "\x1b[D" },
-                    KeyCode::Home => "\x1b[H",
-                    KeyCode::End => "\x1b[F",
-                    KeyCode::PageUp => "\x1b[5~",
-                    KeyCode::PageDown => "\x1b[6~",
+                    F1 => "\x1bOP",
+                    F2 => "\x1bOQ",
+                    F3 => "\x1bOR",
+                    F4 => "\x1bOS",
+                    F5 => "\x1b[15~",
+                    F6 => "\x1b[17~",
+                    F7 => "\x1b[18~",
+                    F8 => "\x1b[19~",
+                    F9 => "\x1b[20~",
+                    F10 => "\x1b[21~",
+                    F11 => "\x1b[23~",
+                    F12 => "\x1b[24~",
+                    ArrowUp => if self.app_cursor_mode { "\x1bOA" } else { "\x1b[A" },
+                    ArrowDown => if self.app_cursor_mode { "\x1bOB" } else { "\x1b[B" },
+                    ArrowRight => if self.app_cursor_mode { "\x1bOC" } else { "\x1b[C" },
+                    ArrowLeft => if self.app_cursor_mode { "\x1bOD" } else { "\x1b[D" },
+                    Home => "\x1b[H",
+                    End => "\x1b[F",
+                    PageUp => "\x1b[5~",
+                    PageDown => "\x1b[6~",
                     _ => "",
                 };
 

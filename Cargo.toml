@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"

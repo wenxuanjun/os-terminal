@@ -117,7 +117,7 @@ let palette = Palette {
 terminal.set_custom_color_scheme(palette);
 ```
 
-> Note that this setting is temporary and you will need to re-execute `set_custom_color_scheme` if you switch to another theme.
+Note that this setting is temporary and you will need to re-execute `set_custom_color_scheme` if you switch to another theme.
 
 Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
 

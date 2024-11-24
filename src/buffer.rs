@@ -209,10 +209,18 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
     #[inline]
     pub fn full_flush(&mut self) {
-        self.buffer
-            .iter_mut()
-            .flat_map(|row| row.iter_mut())
-            .for_each(|c| *c = c.reset_color());
+        macro_rules! reset_buffer {
+            ($buffer:expr) => {
+                $buffer
+                    .iter_mut()
+                    .flat_map(|row| row.iter_mut())
+                    .for_each(|c| *c = c.reset_color());
+            };
+        }
+
+        reset_buffer!(self.buffer);
+        reset_buffer!(self.above_buffer.data);
+        reset_buffer!(self.below_buffer.data);
 
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {

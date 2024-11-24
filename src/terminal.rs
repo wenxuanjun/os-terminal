@@ -156,14 +156,18 @@ impl<D: DrawTarget> Terminal<D> {
         *CONFIG.bell_handler.lock() = handler;
     }
 
+    pub fn set_history_size(&mut self, size: usize) {
+        self.inner.buffer.resize_history(size);
+    }
+
+    pub fn set_natural_scroll(&mut self, mode: bool) {
+        self.inner.keyboard.set_natural_scroll(mode);
+    }
+
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
         *CONFIG.font_manager.lock() = Some(font_manager);
-    }
-    
-    pub fn set_history_size(&mut self, size: usize) {
-        self.inner.buffer.resize_history(size);
     }
 
     pub fn set_color_scheme(&mut self, palette_index: usize) {
