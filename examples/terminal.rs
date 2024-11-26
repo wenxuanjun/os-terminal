@@ -89,7 +89,7 @@ fn main() {
                 loop {
                     match read(master_raw_fd, &mut temp) {
                         Ok(n) if n > 0 => {
-                            terminal.lock().unwrap().advance_state(&temp[..n]);
+                            terminal.lock().unwrap().process(&temp[..n]);
                             redraw_event_proxy.send_event(()).unwrap();
                         }
                         Ok(_) => break,

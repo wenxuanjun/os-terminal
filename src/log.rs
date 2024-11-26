@@ -1,6 +1,5 @@
-use core::fmt;
-
 use crate::config::CONFIG;
+use core::fmt;
 
 macro_rules! log {
     ($($arg:tt)*) => {

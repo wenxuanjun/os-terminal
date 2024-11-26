@@ -11,7 +11,7 @@ pub trait DrawTarget {
     fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb);
 }
 
-pub type FgBgPair = (Rgb, Rgb);
+type FgBgPair = (Rgb, Rgb);
 
 pub struct TextOnGraphic<D: DrawTarget> {
     graphic: D,

@@ -1,6 +1,5 @@
-use unicode_width::UnicodeWidthChar;
-
 use crate::{color::Color, config::CONFIG};
+use unicode_width::UnicodeWidthChar;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,22 +26,18 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn with_placeholder(&self) -> Self {
-        Self {
-            placeholder: true,
-            ..*self
-        }
+    pub fn set_placeholder(mut self) -> Self {
+        self.placeholder = true;
+        self
     }
 
-    pub fn with_content(&self, content: char) -> Self {
-        Self {
-            content,
-            wide: content.width().unwrap_or(0) > 1,
-            ..*self
-        }
+    pub fn set_content(mut self, content: char) -> Self {
+        self.content = content;
+        self.wide = content.width().unwrap_or(0) > 1;
+        self
     }
 
-    pub fn reset_content(&self) -> Self {
+    pub fn clear(&self) -> Self {
         Self {
             background: self.background,
             foreground: self.foreground,
@@ -51,13 +46,13 @@ impl Cell {
     }
 
     pub fn reset_color(&mut self) -> Self {
-        let color_pair = CONFIG.color_scheme.lock().color_pair;
+        let color_scheme = CONFIG.color_scheme.lock();
 
         if let Color::Rgb(_) = self.foreground {
-            self.foreground = Color::Rgb(color_pair.0);
+            self.foreground = Color::Rgb(color_scheme.foreground);
         }
         if let Color::Rgb(_) = self.background {
-            self.background = Color::Rgb(color_pair.1);
+            self.background = Color::Rgb(color_scheme.background);
         }
 
         *self
@@ -73,8 +68,8 @@ impl Default for Cell {
             wide: false,
             placeholder: false,
             flags: Flags::empty(),
-            foreground: Color::Rgb(color_scheme.color_pair.0),
-            background: Color::Rgb(color_scheme.color_pair.1),
+            foreground: Color::Rgb(color_scheme.foreground),
+            background: Color::Rgb(color_scheme.background),
         }
     }
 }

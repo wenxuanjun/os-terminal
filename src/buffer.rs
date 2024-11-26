@@ -1,8 +1,9 @@
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
+use core::mem::swap;
 
-use super::cell::Cell;
-use super::graphic::{DrawTarget, TextOnGraphic};
+use crate::cell::Cell;
+use crate::graphic::{DrawTarget, TextOnGraphic};
 
 const DEFAULT_SIZE: (usize, usize) = (1, 1);
 const DEFAULT_HISTORY_SIZE: usize = 200;
@@ -47,20 +48,22 @@ impl<T> FixedStack<T> {
         self.data.clear();
     }
 
-    pub fn resize(&mut self, new_capacity: usize) {
-        self.capacity = new_capacity;
-        while self.data.len() > new_capacity {
+    pub fn resize(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        while self.data.len() > capacity {
             self.data.pop_front();
         }
-        self.data.shrink_to(new_capacity);
+        self.data.shrink_to(capacity);
     }
 }
 
 pub struct TerminalBuffer<D: DrawTarget> {
     graphic: TextOnGraphic<D>,
     size: (usize, usize),
+    alt_screen_mode: bool,
     flush_cache: VecDeque<Vec<Cell>>,
     buffer: VecDeque<Vec<Cell>>,
+    alt_buffer: VecDeque<Vec<Cell>>,
     above_buffer: FixedStack<Vec<Cell>>,
     below_buffer: FixedStack<Vec<Cell>>,
 }
@@ -84,10 +87,21 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         Self {
             graphic,
             size: DEFAULT_SIZE,
+            alt_screen_mode: false,
             buffer: buffer.clone().into(),
+            alt_buffer: buffer.clone().into(),
             flush_cache: buffer.into(),
             above_buffer: FixedStack::new(DEFAULT_HISTORY_SIZE),
             below_buffer: FixedStack::new(DEFAULT_HISTORY_SIZE),
+        }
+    }
+
+    pub fn swap_alt_screen(&mut self, cell: Cell) {
+        self.alt_screen_mode = !self.alt_screen_mode;
+        swap(&mut self.buffer, &mut self.alt_buffer);
+
+        if self.alt_screen_mode {
+            self.clear(cell);
         }
     }
 
@@ -99,6 +113,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             let buffer = vec![vec![Cell::default(); width]; height].into();
             self.size = (width, height);
             self.buffer.clone_from(&buffer);
+            self.alt_buffer.clone_from(&buffer);
             self.flush_cache = buffer;
         }
     }
@@ -107,7 +122,8 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
     pub fn read(&self, row: usize, col: usize) -> Cell {
-        self.buffer[row % self.height()][col]
+        let row = row % self.height();
+        self.buffer[row][col]
     }
 
     #[inline]
@@ -126,71 +142,39 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
     #[inline]
     pub fn new_line(&mut self, cell: Cell) {
-        self.scroll_up(1, cell);
+        self.scroll(1, cell, true);
     }
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
     pub fn is_latest(&self) -> bool {
-        self.below_buffer.is_empty()
+        if self.alt_screen_mode {
+            true
+        } else {
+            self.below_buffer.is_empty()
+        }
     }
 
     #[inline]
     pub fn back_to_latest(&mut self) {
-        self.scroll_history_up(self.below_buffer.len());
+        if !self.alt_screen_mode {
+            self.scroll_history(self.below_buffer.len(), true);
+        }
     }
 
     #[inline]
     pub fn clear_history(&mut self) {
-        self.above_buffer.clear();
-        self.below_buffer.clear();
+        if !self.alt_screen_mode {
+            self.above_buffer.clear();
+            self.below_buffer.clear();
+        }
     }
 
     #[inline]
     pub fn resize_history(&mut self, new_capacity: usize) {
         self.above_buffer.resize(new_capacity);
         self.below_buffer.resize(new_capacity);
-    }
-}
-
-impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn scroll_up(&mut self, count: usize, cell: Cell) {
-        for _ in 0..count {
-            if let Some(row) = self.buffer.pop_front() {
-                self.above_buffer.push(row);
-            }
-            self.buffer.push_back(vec![cell; self.width()]);
-        }
-    }
-
-    pub fn scroll_down(&mut self, count: usize, cell: Cell) {
-        for _ in 0..count {
-            if let Some(row) = self.buffer.pop_back() {
-                self.below_buffer.push(row);
-            }
-            self.buffer.push_front(vec![cell; self.width()]);
-        }
-    }
-
-    pub fn scroll_history_up(&mut self, count: usize) {
-        let moves = count.min(self.below_buffer.len());
-        for _ in 0..moves {
-            if let Some(row) = self.buffer.pop_front() {
-                self.above_buffer.push(row);
-                self.buffer.push_back(self.below_buffer.pop().unwrap());
-            }
-        }
-    }
-
-    pub fn scroll_history_down(&mut self, count: usize) {
-        let moves = count.min(self.above_buffer.len());
-        for _ in 0..moves {
-            if let Some(row) = self.buffer.pop_back() {
-                self.below_buffer.push(row);
-                self.buffer.push_front(self.above_buffer.pop().unwrap());
-            }
-        }
     }
 }
 
@@ -219,12 +203,57 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
 
         reset_buffer!(self.buffer);
+        reset_buffer!(self.alt_buffer);
         reset_buffer!(self.above_buffer.data);
         reset_buffer!(self.below_buffer.data);
 
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 self.graphic.write(i, j, cell);
+            }
+        }
+    }
+}
+
+impl<D: DrawTarget> TerminalBuffer<D> {
+    pub fn scroll(&mut self, count: usize, cell: Cell, up: bool) {
+        for _ in 0..count {
+            if up {
+                let row = self.buffer.pop_front().unwrap();
+                if !self.alt_screen_mode {
+                    self.above_buffer.push(row);
+                }
+                self.buffer.push_back(vec![cell; self.width()]);
+            } else {
+                let row = self.buffer.pop_back().unwrap();
+                if !self.alt_screen_mode {
+                    self.below_buffer.push(row);
+                }
+                self.buffer.push_front(vec![cell; self.width()]);
+            }
+        }
+    }
+
+    pub fn scroll_history(&mut self, count: usize, up: bool) {
+        if self.alt_screen_mode {
+            return;
+        }
+
+        let moves = if up {
+            count.min(self.below_buffer.len())
+        } else {
+            count.min(self.above_buffer.len())
+        };
+
+        for _ in 0..moves {
+            if up {
+                let row = self.buffer.pop_front().unwrap();
+                self.above_buffer.push(row);
+                self.buffer.push_back(self.below_buffer.pop().unwrap());
+            } else {
+                let row = self.buffer.pop_back().unwrap();
+                self.below_buffer.push(row);
+                self.buffer.push_front(self.above_buffer.pop().unwrap());
             }
         }
     }

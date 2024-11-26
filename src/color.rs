@@ -1,5 +1,4 @@
 use crate::config::CONFIG;
-use crate::graphic::FgBgPair;
 use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE_DATA};
 
 #[repr(u8)]
@@ -39,8 +38,8 @@ impl Color {
             Self::Indexed(index) => {
                 let color_scheme = CONFIG.color_scheme.lock();
                 match index {
-                    256 => color_scheme.color_pair.0,
-                    257 => color_scheme.color_pair.1,
+                    256 => color_scheme.foreground,
+                    257 => color_scheme.background,
                     index => color_scheme.ansi_colors[index as usize],
                 }
             }
@@ -49,7 +48,8 @@ impl Color {
 }
 
 pub struct ColorScheme {
-    pub color_pair: FgBgPair,
+    pub foreground: Rgb,
+    pub background: Rgb,
     pub ansi_colors: [Rgb; 256],
 }
 
@@ -86,7 +86,8 @@ impl ColorScheme {
         }
 
         Self {
-            color_pair: palette.color_pair,
+            foreground: palette.foreground,
+            background: palette.background,
             ansi_colors: colors,
         }
     }

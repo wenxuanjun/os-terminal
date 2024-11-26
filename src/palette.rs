@@ -1,19 +1,19 @@
-use spin::Lazy;
-
 use crate::color::Rgb;
-use crate::graphic::FgBgPair;
+use spin::Lazy;
 
 pub const DEFAULT_PALETTE_INDEX: usize = 0;
 
 pub struct Palette {
-    pub color_pair: FgBgPair,
+    pub foreground: Rgb,
+    pub background: Rgb,
     pub ansi_colors: [Rgb; 16],
 }
 
 impl Palette {
     fn build(pair: (&str, &str), ansi_colors: [&str; 16]) -> Self {
         Self {
-            color_pair: (Self::hex_to_rgb(pair.0), Self::hex_to_rgb(pair.1)),
+            foreground: Self::hex_to_rgb(pair.0),
+            background: Self::hex_to_rgb(pair.1),
             ansi_colors: ansi_colors.map(Self::hex_to_rgb),
         }
     }

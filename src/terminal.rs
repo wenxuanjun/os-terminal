@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use alloc::string::String;
+use core::mem::swap;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
@@ -75,6 +76,7 @@ pub struct Terminal<D: DrawTarget> {
 pub struct TerminalInner<D: DrawTarget> {
     cursor: Cursor,
     saved_cursor: Cursor,
+    alt_cursor: Cursor,
     mode: TerminalMode,
     attribute_template: Cell,
     buffer: TerminalBuffer<D>,
@@ -91,6 +93,7 @@ impl<D: DrawTarget> Terminal<D> {
             inner: TerminalInner {
                 cursor: Cursor::default(),
                 saved_cursor: Cursor::default(),
+                alt_cursor: Cursor::default(),
                 mode: TerminalMode::default(),
                 attribute_template: Cell::default(),
                 buffer: TerminalBuffer::new(graphic),
@@ -99,11 +102,11 @@ impl<D: DrawTarget> Terminal<D> {
         }
     }
 
-    pub const fn rows(&self) -> usize {
+    pub fn rows(&self) -> usize {
         self.inner.buffer.height()
     }
 
-    pub const fn columns(&self) -> usize {
+    pub fn columns(&self) -> usize {
         self.inner.buffer.width()
     }
 
@@ -111,7 +114,7 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.flush();
     }
 
-    pub fn advance_state(&mut self, bstr: &[u8]) {
+    pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
         for &byte in bstr {
             self.performer.advance(&mut self.inner, byte);
@@ -128,6 +131,9 @@ impl<D: DrawTarget> Terminal<D> {
         let event = self.inner.keyboard.handle_keyboard(scancode);
 
         if let KeyboardEvent::AnsiString(s) = event {
+            if !self.inner.buffer.is_latest() {
+                self.inner.buffer.back_to_latest();
+            }
             return Some(s);
         }
 
@@ -167,6 +173,7 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
+        self.inner.reset_state();
         *CONFIG.font_manager.lock() = Some(font_manager);
     }
 
@@ -185,7 +192,7 @@ impl<D: DrawTarget> Terminal<D> {
 
 impl<D: DrawTarget> fmt::Write for Terminal<D> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.advance_state(s.as_bytes());
+        self.process(s.as_bytes());
         Ok(())
     }
 }
@@ -201,7 +208,8 @@ impl<D: DrawTarget> TerminalInner<D> {
             CursorShape::Block => Flags::CURSOR_BLOCK,
             CursorShape::Underline => Flags::CURSOR_UNDERLINE,
             CursorShape::Beam => Flags::CURSOR_BEAM,
-            _ => return,
+            CursorShape::HollowBlock => Flags::CURSOR_BLOCK,
+            CursorShape::Hidden => Flags::HIDDEN,
         };
 
         if enable {
@@ -215,12 +223,22 @@ impl<D: DrawTarget> TerminalInner<D> {
 
     fn scroll_history_up(&mut self, count: usize) {
         log!("Scroll up with buffer: {}", count);
-        self.buffer.scroll_history_up(count);
+        self.buffer.scroll_history(count, true);
     }
 
     fn scroll_history_down(&mut self, count: usize) {
         log!("Scroll down with buffer: {}", count);
-        self.buffer.scroll_history_down(count);
+        self.buffer.scroll_history(count, false);
+    }
+
+    fn swap_alt_screen(&mut self) {
+        self.mode ^= TerminalMode::ALT_SCREEN;
+        swap(&mut self.cursor, &mut self.alt_cursor);
+        self.buffer.swap_alt_screen(self.attribute_template);
+
+        if !self.mode.contains(TerminalMode::ALT_SCREEN) {
+            self.saved_cursor = self.cursor;
+        }
     }
 }
 
@@ -230,7 +248,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
-        log!("Unhandled set_cursor_style: {:?}", style);
+        log!("Set cursor style: {:?}", style);
+        if let Some(style) = style {
+            self.set_cursor_shape(style.shape);
+        }
     }
 
     fn set_cursor_shape(&mut self, shape: CursorShape) {
@@ -238,18 +259,13 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn input(&mut self, content: char) {
-        let template = self.attribute_template.with_content(content);
-        let target_width = if template.wide { 2 } else { 1 };
+        let template = self.attribute_template.set_content(content);
+        let width = if template.wide { 2 } else { 1 };
 
-        if !self.buffer.is_latest() {
-            self.buffer.back_to_latest();
-        }
-
-        if self.cursor.column + target_width > self.buffer.width() {
+        if self.cursor.column + width > self.buffer.width() {
             if !self.mode.contains(TerminalMode::LINE_WRAP) {
                 return;
             }
-            self.cursor.column = 0;
             self.linefeed();
         }
 
@@ -258,11 +274,8 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         self.cursor.column += 1;
 
         if template.wide {
-            self.buffer.write(
-                self.cursor.row,
-                self.cursor.column,
-                template.with_placeholder(),
-            );
+            self.buffer
+                .write(self.cursor.row, self.cursor.column, template.set_placeholder());
             self.cursor.column += 1;
         }
     }
@@ -288,7 +301,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let (row, columns) = (self.cursor.row, self.buffer.width());
         let count = min(count, columns - self.cursor.column);
 
-        let template = self.attribute_template.reset_content();
+        let template = self.attribute_template.clear();
         for column in (self.cursor.column..columns - count).rev() {
             self.buffer
                 .write(row, column + count, self.buffer.read(row, column));
@@ -344,7 +357,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         for _ in 0..count {
             let tab_stop = self.cursor.column.div_ceil(8) * 8;
             let end_column = tab_stop.min(self.buffer.width());
-            let template = self.attribute_template.reset_content();
+            let template = self.attribute_template.clear();
 
             while self.cursor.column < end_column {
                 self.buffer
@@ -391,12 +404,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn scroll_up(&mut self, count: usize) {
         log!("Scroll up: {}", count);
-        self.buffer.scroll_up(count, self.attribute_template);
+        self.buffer.scroll(count, self.attribute_template, true);
     }
 
     fn scroll_down(&mut self, count: usize) {
         log!("Scroll down: {}", count);
-        self.buffer.scroll_down(count, self.attribute_template);
+        self.buffer.scroll(count, self.attribute_template, false);
     }
 
     fn insert_blank_lines(&mut self, count: usize) {
@@ -412,7 +425,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let start = self.cursor.column;
         let end = min(start + count, self.buffer.width());
 
-        let template = self.attribute_template.reset_content();
+        let template = self.attribute_template.clear();
         for column in start..end {
             self.buffer.write(self.cursor.row, column, template);
         }
@@ -423,7 +436,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let (row, columns) = (self.cursor.row, self.buffer.width());
         let count = min(count, columns - self.cursor.column - 1);
 
-        let template = self.attribute_template.reset_content();
+        let template = self.attribute_template.clear();
         for column in (self.cursor.column + count)..columns {
             self.buffer
                 .write(row, column - count, self.buffer.read(row, column));
@@ -448,7 +461,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clear_line(&mut self, mode: LineClearMode) {
-        let template = self.attribute_template.reset_content();
+        let template = self.attribute_template.clear();
         match mode {
             LineClearMode::Right => {
                 for column in self.cursor.column..self.buffer.width() {
@@ -469,7 +482,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clear_screen(&mut self, mode: ClearMode) {
-        let template = self.attribute_template.reset_content();
+        let template = self.attribute_template.clear();
         match mode {
             ClearMode::Above => {
                 for row in 0..self.cursor.row {
@@ -508,11 +521,20 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn reset_state(&mut self) {
-        log!("Unhandled reset_state!");
+        log!("Reset state");
+        if self.mode.contains(TerminalMode::ALT_SCREEN) {
+            self.swap_alt_screen();
+        }
+        self.buffer.clear(Cell::default());
+        self.cursor = Cursor::default();
+        self.saved_cursor = self.cursor;
+        self.buffer.clear_history();
+        self.mode = TerminalMode::default();
+        self.attribute_template = Cell::default();
     }
 
     fn reverse_index(&mut self) {
-        log!("Unhandled reverse_index!");
+        log!("Reverse index");
         if self.cursor.row > 0 {
             self.cursor.row -= 1;
         } else {
@@ -568,6 +590,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         };
 
         match mode {
+            NamedPrivateMode::SwapScreenAndSetRestoreCursor => {
+                if !self.mode.contains(TerminalMode::ALT_SCREEN) {
+                    self.swap_alt_screen();
+                }
+            }
             NamedPrivateMode::ShowCursor => self.mode.insert(TerminalMode::SHOW_CURSOR),
             NamedPrivateMode::CursorKeys => {
                 self.mode.insert(TerminalMode::APP_CURSOR);
@@ -588,6 +615,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         };
 
         match mode {
+            NamedPrivateMode::SwapScreenAndSetRestoreCursor => {
+                if self.mode.contains(TerminalMode::ALT_SCREEN) {
+                    self.swap_alt_screen();
+                }
+            }
             NamedPrivateMode::ShowCursor => self.mode.remove(TerminalMode::SHOW_CURSOR),
             NamedPrivateMode::CursorKeys => {
                 self.mode.remove(TerminalMode::APP_CURSOR);

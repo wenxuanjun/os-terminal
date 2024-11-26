@@ -69,7 +69,7 @@ for scancode in scancodes.iter() {
 And then you can advance the terminal state with the escaped string from the output of your shell.
 
 ```rust
-terminal.advance_state(b"\x1b[31mHello, world!\x1b[0m");
+terminal.process(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
@@ -121,15 +121,15 @@ Note that this setting is temporary and you will need to re-execute `set_custom_
 
 Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
 
-You can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
+Moreover, you can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
 
 ## Shortcuts
 
 With `handle_keyboard`, some shortcuts are supported:
 
 - `Ctrl + Shift + F1-F8`: Switch to different built-in themes
-- `Ctrl + Alt + ArrowUp/ArrowDown`: Scroll up/down history
-- `Ctrl + Alt + PageUp/PageDown`: Scroll up/down history by page
+- `Ctrl + Shift + ArrowUp/ArrowDown`: Scroll up/down history
+- `Ctrl + Shift + PageUp/PageDown`: Scroll up/down history by page
 
 ## Features
 
