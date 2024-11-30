@@ -16,7 +16,7 @@ use crate::cell::{Cell, Flags};
 use crate::color::{Color, ColorScheme};
 use crate::config::CONFIG;
 use crate::font::FontManager;
-use crate::graphic::{DrawTarget, TextOnGraphic};
+use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
 use crate::palette::Palette;
 
@@ -85,7 +85,7 @@ pub struct TerminalInner<D: DrawTarget> {
 
 impl<D: DrawTarget> Terminal<D> {
     pub fn new(display: D) -> Self {
-        let mut graphic = TextOnGraphic::new(display);
+        let mut graphic = Graphic::new(display);
         graphic.clear(Cell::default());
 
         Self {

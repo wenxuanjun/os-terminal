@@ -13,12 +13,12 @@ pub trait DrawTarget {
 
 type FgBgPair = (Rgb, Rgb);
 
-pub struct TextOnGraphic<D: DrawTarget> {
+pub struct Graphic<D: DrawTarget> {
     graphic: D,
     color_cache: BTreeMap<FgBgPair, ColorCache>,
 }
 
-impl<D: DrawTarget> TextOnGraphic<D> {
+impl<D: DrawTarget> Graphic<D> {
     #[inline]
     pub fn width(&self) -> usize {
         self.graphic.size().0
@@ -30,7 +30,7 @@ impl<D: DrawTarget> TextOnGraphic<D> {
     }
 }
 
-impl<D: DrawTarget> TextOnGraphic<D> {
+impl<D: DrawTarget> Graphic<D> {
     pub fn new(graphic: D) -> Self {
         Self {
             graphic,
@@ -39,10 +39,12 @@ impl<D: DrawTarget> TextOnGraphic<D> {
     }
 
     pub fn clear(&mut self, cell: Cell) {
+        let color = cell.background.to_rgb();
         let (width, height) = self.graphic.size();
+
         for y in 0..height {
             for x in 0..width {
-                self.graphic.draw_pixel(x, y, cell.background.to_rgb());
+                self.graphic.draw_pixel(x, y, color);
             }
         }
     }

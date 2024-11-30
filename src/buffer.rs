@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::mem::swap;
 
 use crate::cell::Cell;
-use crate::graphic::{DrawTarget, TextOnGraphic};
+use crate::graphic::{DrawTarget, Graphic};
 
 const DEFAULT_SIZE: (usize, usize) = (1, 1);
 const DEFAULT_HISTORY_SIZE: usize = 200;
@@ -58,7 +58,7 @@ impl<T> FixedStack<T> {
 }
 
 pub struct TerminalBuffer<D: DrawTarget> {
-    graphic: TextOnGraphic<D>,
+    graphic: Graphic<D>,
     size: (usize, usize),
     alt_screen_mode: bool,
     flush_cache: VecDeque<Vec<Cell>>,
@@ -70,18 +70,18 @@ pub struct TerminalBuffer<D: DrawTarget> {
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
-    pub const fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.size.0
     }
 
     #[inline]
-    pub const fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.size.1
     }
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn new(graphic: TextOnGraphic<D>) -> Self {
+    pub fn new(graphic: Graphic<D>) -> Self {
         let buffer = vec![vec![Cell::default(); DEFAULT_SIZE.0]; DEFAULT_SIZE.1];
 
         Self {
@@ -206,6 +206,8 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         reset_buffer!(self.alt_buffer);
         reset_buffer!(self.above_buffer.data);
         reset_buffer!(self.below_buffer.data);
+
+        self.graphic.clear(Cell::default());
 
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {

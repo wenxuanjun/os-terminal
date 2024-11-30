@@ -110,7 +110,8 @@ Custom theme is also supported:
 
 ```rust
 let palette = Palette {
-    color_pair: (...),
+    foreground: ...,
+    background: ...,
     ansi_colors: [...],
 }
 
