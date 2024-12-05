@@ -86,7 +86,7 @@ pub struct TerminalInner<D: DrawTarget> {
 impl<D: DrawTarget> Terminal<D> {
     pub fn new(display: D) -> Self {
         let mut graphic = Graphic::new(display);
-        graphic.clear(Cell::default());
+        graphic.clear((0, 0), graphic.size(), Cell::default());
 
         Self {
             performer: Processor::new(),
@@ -238,6 +238,7 @@ impl<D: DrawTarget> TerminalInner<D> {
 
         if !self.mode.contains(TerminalMode::ALT_SCREEN) {
             self.saved_cursor = self.cursor;
+            self.attribute_template = Cell::default();
         }
     }
 }
@@ -274,8 +275,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         self.cursor.column += 1;
 
         if template.wide {
-            self.buffer
-                .write(self.cursor.row, self.cursor.column, template.set_placeholder());
+            self.buffer.write(
+                self.cursor.row,
+                self.cursor.column,
+                template.set_placeholder(),
+            );
             self.cursor.column += 1;
         }
     }
@@ -385,6 +389,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn bell(&mut self) {
+        log!("Bell triggered!");
         if let Some(handler) = CONFIG.bell_handler.lock().as_ref() {
             handler();
         }

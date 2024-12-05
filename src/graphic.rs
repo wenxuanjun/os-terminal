@@ -28,6 +28,11 @@ impl<D: DrawTarget> Graphic<D> {
     pub fn height(&self) -> usize {
         self.graphic.size().1
     }
+
+    #[inline]
+    pub fn size(&self) -> (usize, usize) {
+        self.graphic.size()
+    }
 }
 
 impl<D: DrawTarget> Graphic<D> {
@@ -38,12 +43,17 @@ impl<D: DrawTarget> Graphic<D> {
         }
     }
 
-    pub fn clear(&mut self, cell: Cell) {
+    pub fn clear(
+        &mut self,
+        start: impl Into<(usize, usize)>,
+        end: impl Into<(usize, usize)>,
+        cell: Cell,
+    ) {
         let color = cell.background.to_rgb();
-        let (width, height) = self.graphic.size();
+        let (start, end) = (start.into(), end.into());
 
-        for y in 0..height {
-            for x in 0..width {
+        for y in start.1..end.1 {
+            for x in start.0..end.0 {
                 self.graphic.draw_pixel(x, y, color);
             }
         }

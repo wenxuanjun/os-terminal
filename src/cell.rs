@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthChar;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Flags: u16 {
+    pub struct Flags: u8 {
         const INVERSE = 1 << 0;
         const BOLD = 1 << 1;
         const ITALIC = 1 << 2;

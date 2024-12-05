@@ -60,6 +60,7 @@ impl<T> FixedStack<T> {
 pub struct TerminalBuffer<D: DrawTarget> {
     graphic: Graphic<D>,
     size: (usize, usize),
+    pixel_size: (usize, usize),
     alt_screen_mode: bool,
     flush_cache: VecDeque<Vec<Cell>>,
     buffer: VecDeque<Vec<Cell>>,
@@ -87,6 +88,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         Self {
             graphic,
             size: DEFAULT_SIZE,
+            pixel_size: (0, 0),
             alt_screen_mode: false,
             buffer: buffer.clone().into(),
             alt_buffer: buffer.clone().into(),
@@ -108,6 +110,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn update_size(&mut self, font_width: usize, font_height: usize) {
         let width = self.graphic.width() / font_width;
         let height = self.graphic.height() / font_height;
+        self.pixel_size = (font_width * width, font_height * height);
 
         if self.size != (width, height) {
             let buffer = vec![vec![Cell::default(); width]; height].into();
@@ -191,7 +194,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
     }
 
-    #[inline]
     pub fn full_flush(&mut self) {
         macro_rules! reset_buffer {
             ($buffer:expr) => {
@@ -207,12 +209,23 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         reset_buffer!(self.above_buffer.data);
         reset_buffer!(self.below_buffer.data);
 
-        self.graphic.clear(Cell::default());
-
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 self.graphic.write(i, j, cell);
             }
+        }
+
+        for (start, end) in [
+            (
+                (0, self.pixel_size.1),
+                (self.pixel_size.0, self.graphic.height()),
+            ),
+            (
+                (self.pixel_size.0, 0),
+                (self.graphic.width(), self.graphic.height()),
+            ),
+        ] {
+            self.graphic.clear(start, end, Cell::default());
         }
     }
 }

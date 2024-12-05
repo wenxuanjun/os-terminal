@@ -1,5 +1,5 @@
 use crate::config::CONFIG;
-use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE_DATA};
+use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE};
 
 #[repr(u8)]
 #[derive(Debug)]
@@ -61,9 +61,9 @@ impl Default for ColorScheme {
 
 impl ColorScheme {
     pub fn new(palette_index: usize) -> Self {
-        let palette = PALETTE_DATA
+        let palette = PALETTE
             .get(palette_index)
-            .unwrap_or(&PALETTE_DATA[DEFAULT_PALETTE_INDEX]);
+            .unwrap_or(&PALETTE[DEFAULT_PALETTE_INDEX]);
         Self::from_palette(palette)
     }
 

@@ -27,7 +27,7 @@ impl Palette {
     }
 }
 
-pub static PALETTE_DATA: Lazy<[Palette; 8]> = Lazy::new(|| {
+pub static PALETTE: Lazy<[Palette; 8]> = Lazy::new(|| {
     [
         Palette::build(
             ("#f5f5f5", "#151515"),
