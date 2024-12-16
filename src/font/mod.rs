@@ -13,7 +13,7 @@ pub use truetype::TrueTypeFont;
 pub enum Rasterized<'a> {
     Slice(&'a [&'a [u8]]),
     Vec(&'a Vec<Vec<u8>>),
-    Owned(Vec<Vec<u8>>)
+    Owned(Vec<Vec<u8>>),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord)]

@@ -1,7 +1,8 @@
+use std::env;
 use std::ffi::CString;
 use std::num::NonZeroU32;
 use std::os::fd::AsFd;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, IntoRawFd};
 use std::process;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::{unbounded, Sender};
 use keycode::{KeyMap, KeyMapping};
 use nix::errno::Errno;
-use nix::libc::{ioctl, TIOCSWINSZ};
+use nix::libc::{ioctl, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
 use os_terminal::font::TrueTypeFont;
@@ -46,8 +47,7 @@ fn main() {
 
     match unsafe { fork() } {
         Ok(ForkResult::Child) => {
-            // In the child process, we execute bash
-            close(master.as_raw_fd()).unwrap();
+            close(master.into_raw_fd()).unwrap();
 
             let win_size = {
                 let terminal = terminal.lock().unwrap();
@@ -59,19 +59,21 @@ fn main() {
                 }
             };
 
-            setsid().unwrap();
-            unsafe { ioctl(slave.as_raw_fd(), TIOCSWINSZ, &win_size) };
+            unsafe {
+                setsid().unwrap();
+                ioctl(slave.as_raw_fd(), TIOCSCTTY, 0);
+                ioctl(slave.as_raw_fd(), TIOCSWINSZ, &win_size);
+            }
 
             dup2(slave.as_raw_fd(), 0).unwrap();
             dup2(slave.as_raw_fd(), 1).unwrap();
             dup2(slave.as_raw_fd(), 2).unwrap();
 
-            let _ = execvp::<CString>(&CString::new("bash").unwrap(), &[]);
+            let shell = env::var("SHELL").unwrap_or("bash".into());
+            let _ = execvp::<CString>(&CString::new(shell).unwrap(), &[]);
         }
         Ok(ForkResult::Parent { .. }) => {
-            // In the parent process, we handle the terminal I/O
-            close(slave.as_raw_fd()).unwrap();
-            let master_raw_fd = master.as_raw_fd();
+            close(slave.into_raw_fd()).unwrap();
 
             let event_loop = EventLoop::new().unwrap();
             let redraw_event_proxy = event_loop.create_proxy();
@@ -83,6 +85,8 @@ fn main() {
                 terminal.clone(),
                 redraw_event_proxy.clone(),
             );
+
+            let master_raw_fd = master.as_raw_fd();
 
             std::thread::spawn(move || {
                 let mut temp = [0u8; 1024];

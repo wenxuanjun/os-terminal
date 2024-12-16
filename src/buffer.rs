@@ -108,7 +108,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn update_size(&mut self, font_width: usize, font_height: usize) {
-        if font_width == 0 || font_width == 0 {
+        if font_width == 0 || font_height == 0 {
             return;
         }
 
