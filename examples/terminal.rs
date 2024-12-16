@@ -19,10 +19,10 @@ use os_terminal::{DrawTarget, Rgb, Terminal};
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::platform::scancode::PhysicalKeyExtScancode;
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
 
@@ -180,7 +180,10 @@ impl ApplicationHandler for App {
             .with_title("Terminal")
             .with_resizable(false)
             .with_inner_size(PhysicalSize::new(width as f64, height as f64));
+
         let window = Rc::new(event_loop.create_window(attributes).unwrap());
+        window.set_ime_allowed(true);
+        window.set_ime_purpose(ImePurpose::Terminal);
 
         let context = Context::new(window.clone()).unwrap();
         let mut surface = Surface::new(&context, window.clone()).unwrap();
@@ -226,6 +229,17 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 if window_id == window.id() {
                     event_loop.exit();
+                }
+            }
+            WindowEvent::Ime(ime) => {
+                if window_id == window.id() {
+                    match ime {
+                        Ime::Commit(text) => {
+                            self.ansi_sender.send(text).unwrap();
+                            self.redraw_event_proxy.send_event(()).unwrap();
+                        }
+                        _ => {}
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {

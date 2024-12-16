@@ -13,14 +13,15 @@ pub use truetype::TrueTypeFont;
 pub enum Rasterized<'a> {
     Slice(&'a [&'a [u8]]),
     Vec(&'a Vec<Vec<u8>>),
+    Owned(Vec<Vec<u8>>)
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ContentInfo {
-    content: char,
-    bold: bool,
-    italic: bool,
-    wide: bool,
+    pub content: char,
+    pub bold: bool,
+    pub italic: bool,
+    pub wide: bool,
 }
 
 impl ContentInfo {

@@ -108,6 +108,10 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn update_size(&mut self, font_width: usize, font_height: usize) {
+        if font_width == 0 || font_width == 0 {
+            return;
+        }
+
         let width = self.graphic.width() / font_width;
         let height = self.graphic.height() / font_height;
         self.pixel_size = (font_width * width, font_height * height);

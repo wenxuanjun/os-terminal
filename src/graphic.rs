@@ -105,6 +105,7 @@ impl<D: DrawTarget> Graphic<D> {
             match font_manager.rasterize(content_info) {
                 Rasterized::Slice(raster) => draw_raster!(raster),
                 Rasterized::Vec(raster) => draw_raster!(raster),
+                Rasterized::Owned(raster) => draw_raster!(raster),
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
