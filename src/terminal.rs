@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
 
-use vte::ansi::{Attr, Color as AnsiColor, Rgb};
+use vte::ansi::{Attr, Color as AnsiColor, NamedMode, Rgb};
 use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
 use vte::ansi::{ClearMode, CursorShape, Processor, Timeout};
 use vte::ansi::{CursorStyle, Hyperlink, KeyboardModes};
@@ -81,6 +81,7 @@ pub struct TerminalInner<D: DrawTarget> {
     attribute_template: Cell,
     buffer: TerminalBuffer<D>,
     keyboard: KeyboardManager,
+    scroll_region: (usize, usize),
 }
 
 impl<D: DrawTarget> Terminal<D> {
@@ -98,6 +99,7 @@ impl<D: DrawTarget> Terminal<D> {
                 attribute_template: Cell::default(),
                 buffer: TerminalBuffer::new(graphic),
                 keyboard: KeyboardManager::default(),
+                scroll_region: (0, 0),
             },
         }
     }
@@ -173,6 +175,7 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
+        self.inner.scroll_region = (0, self.inner.buffer.height() - 1);
         self.inner.reset_state();
         *CONFIG.font_manager.lock() = Some(font_manager);
     }
@@ -268,6 +271,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 return;
             }
             self.linefeed();
+            self.carriage_return();
         }
 
         self.buffer
@@ -285,7 +289,6 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn goto(&mut self, row: i32, col: usize) {
-        log!("Goto: row={}, col={}", row, col);
         self.cursor.row = min(row as usize, self.buffer.height());
         self.cursor.column = min(col, self.buffer.width());
     }
@@ -380,11 +383,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn linefeed(&mut self) {
-        self.cursor.column = 0;
-        if self.cursor.row < self.buffer.height() - 1 {
+        if self.cursor.row == self.scroll_region.1 {
+            self.scroll_up(1);
+        } else if self.cursor.row < self.buffer.height() - 1 {
             self.cursor.row += 1;
-        } else {
-            self.buffer.new_line(self.attribute_template);
         }
     }
 
@@ -400,29 +402,38 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn newline(&mut self) {
-        log!("Unhandled newline!");
+        log!("Newline!");
+        self.linefeed();
+
+        if self.mode.contains(TerminalMode::LINE_FEED_NEW_LINE) {
+            self.carriage_return();
+        }
     }
 
     fn set_horizontal_tabstop(&mut self) {
-        log!("Unhandled set_horizontal_tabstop!");
+        log!("Unhandled set horizontal tabstop!");
     }
 
     fn scroll_up(&mut self, count: usize) {
-        log!("Scroll up: {}", count);
-        self.buffer.scroll(count, self.attribute_template, true);
+        let region = self.scroll_region;
+        self.buffer
+            .scroll(count, self.attribute_template, true, region);
     }
 
     fn scroll_down(&mut self, count: usize) {
-        log!("Scroll down: {}", count);
-        self.buffer.scroll(count, self.attribute_template, false);
+        let region = self.scroll_region;
+        self.buffer
+            .scroll(count, self.attribute_template, false, region);
     }
 
     fn insert_blank_lines(&mut self, count: usize) {
-        log!("Unhandled insert blank lines: {}", count);
+        log!("Insert blank lines: {}", count);
+        self.scroll_down(count);
     }
 
     fn delete_lines(&mut self, count: usize) {
-        log!("Unhandled delete lines: {}", count);
+        log!("Delete lines: {}", count);
+        self.scroll_up(count);
     }
 
     fn erase_chars(&mut self, count: usize) {
@@ -540,10 +551,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn reverse_index(&mut self) {
         log!("Reverse index");
-        if self.cursor.row > 0 {
-            self.cursor.row -= 1;
-        } else {
+        if self.cursor.row == self.scroll_region.0 {
             self.scroll_down(1);
+        } else {
+            self.cursor.row -= 1;
         }
     }
 
@@ -574,11 +585,33 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_mode(&mut self, mode: Mode) {
-        log!("Unhandled set mode: {:?}", mode);
+        let mode = match mode {
+            Mode::Named(mode) => mode,
+            Mode::Unknown(mode) => {
+                log!("Ignoring unknown mode {} in set_mode", mode);
+                return;
+            }
+        };
+
+        match mode {
+            NamedMode::Insert => self.mode.insert(TerminalMode::INSERT),
+            NamedMode::LineFeedNewLine => self.mode.insert(TerminalMode::LINE_FEED_NEW_LINE),
+        }
     }
 
     fn unset_mode(&mut self, mode: Mode) {
-        log!("Unhandled unset mode: {:?}", mode);
+        let mode = match mode {
+            Mode::Named(mode) => mode,
+            Mode::Unknown(mode) => {
+                log!("Ignoring unknown mode {} in unset_mode", mode);
+                return;
+            }
+        };
+
+        match mode {
+            NamedMode::Insert => self.mode.remove(TerminalMode::INSERT),
+            NamedMode::LineFeedNewLine => self.mode.remove(TerminalMode::LINE_FEED_NEW_LINE),
+        }
     }
 
     fn report_mode(&mut self, mode: Mode) {
@@ -640,11 +673,17 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_scrolling_region(&mut self, top: usize, bottom: Option<usize>) {
-        log!(
-            "Unhandled set scrolling region: top={}, bottom={:?}",
-            top,
-            bottom
-        );
+        log!("Set scrolling region: top={}, bottom={:?}", top, bottom);
+        let bottom = bottom.unwrap_or(self.buffer.height());
+
+        if top >= bottom {
+            log!("Invalid scrolling region: ({};{})", top, bottom);
+            return;
+        }
+
+        self.scroll_region.0 = min(top, self.buffer.height()) - 1;
+        self.scroll_region.1 = min(bottom, self.buffer.height()) - 1;
+        self.goto(0, 0);
     }
 
     fn set_keypad_application_mode(&mut self) {

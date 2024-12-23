@@ -14,9 +14,11 @@ This screenshot shows the result of running `fastfetch` in the example terminal.
 
 - Embedded smooth noto sans mono font rendering
 - Truetype font support
-- VT100 and part of xterm escape sequence support
-- Beautiful color scheme
+- VT100 and part of XTerm escape sequence support
+- Wide character support
+- Integrated color schemes
 - Cursor display and shape control
+- Support sufficient complex applications (e.g. htop, nvim, etc.)
 
 ## Usage
 
@@ -140,7 +142,7 @@ With `handle_keyboard`, some shortcuts are supported:
 ## Acknowledgement
 
 - [embedded-term](https://github.com/rcore-os/embedded-term): This project is a fork of it with some simplifications and improvements.
-- [alacritty](https://github.com/CyberFlameGO/alacritty): General reference for the terminal implementation.
+- [alacritty](https://github.com/alacritty): General reference for the terminal implementation and `vte` crate.
 - [noto-sans-mono-bitmap-rs](https://github.com/phip1611/noto-sans-mono-bitmap-rs): Pre-rasterized smooth characters.
 
 Thanks to the original author and contributors for their great work.

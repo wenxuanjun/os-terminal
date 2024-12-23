@@ -133,19 +133,20 @@ struct ColorCache {
 
 impl ColorCache {
     fn new(foreground: Rgb, background: Rgb) -> Self {
-        let r_diff = foreground.0 as i32 - background.0 as i32;
-        let g_diff = foreground.1 as i32 - background.1 as i32;
-        let b_diff = foreground.2 as i32 - background.2 as i32;
+        let [r_diff, g_diff, b_diff] = [
+            foreground.0 as i32 - background.0 as i32,
+            foreground.1 as i32 - background.1 as i32,
+            foreground.2 as i32 - background.2 as i32,
+        ];
 
-        let mut colors = [(0u8, 0u8, 0u8); 256];
-
-        for (intensity, color) in colors.iter_mut().enumerate() {
+        let colors = core::array::from_fn(|intensity| {
             let weight = intensity as i32;
-            let r = ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            let g = ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            let b = ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            *color = (r, g, b);
-        }
+            (
+                ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8,
+                ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8,
+                ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8,
+            )
+        });
 
         Self { colors }
     }

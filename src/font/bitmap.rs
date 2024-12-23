@@ -21,7 +21,7 @@ impl FontManager for BitmapFont {
         };
 
         let char_raster = get_raster(info.content, font_weight, FONT_HEIGHT)
-            .unwrap_or_else(|| get_raster('\u{fffd}', font_weight, FONT_HEIGHT).unwrap());
+            .unwrap_or(get_raster('\u{fffd}', font_weight, FONT_HEIGHT).unwrap());
 
         Rasterized::Slice(char_raster.raster())
     }
