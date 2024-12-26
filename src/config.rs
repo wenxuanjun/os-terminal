@@ -13,6 +13,7 @@ pub struct TerminalConfig {
     pub font_manager: Mutex<Option<Box<dyn FontManager>>>,
     pub color_scheme: Mutex<ColorScheme>,
     pub bell_handler: Mutex<Option<fn()>>,
+    pub auto_crnl: AtomicBool,
 }
 
 impl Default for TerminalConfig {
@@ -23,6 +24,7 @@ impl Default for TerminalConfig {
             font_manager: Mutex::new(None),
             color_scheme: Mutex::new(ColorScheme::default()),
             bell_handler: Mutex::new(None),
+            auto_crnl: AtomicBool::new(true),
         }
     }
 }

@@ -126,6 +126,8 @@ Default history size is `200` lines. You can change it by calling `terminal.set_
 
 Moreover, you can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
 
+In a bare-metal environment (e.g. your toy OS), you may wish to have all `\n` automatically converted to `\r\n` (handled by the tty devices in linux). You can use `terminal.set_auto_crnl(true)` to enable this feature.
+
 ## Shortcuts
 
 With `handle_keyboard`, some shortcuts are supported:

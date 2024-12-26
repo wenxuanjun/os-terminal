@@ -172,6 +172,10 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.keyboard.set_natural_scroll(mode);
     }
 
+    pub fn set_auto_crnl(&mut self, auto_crnl: bool) {
+        CONFIG.auto_crnl.store(auto_crnl, Ordering::Relaxed);
+    }
+
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
@@ -259,6 +263,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_cursor_shape(&mut self, shape: CursorShape) {
+        log!("Set cursor shape: {:?}", shape);
         self.cursor.shape = shape;
     }
 
@@ -331,7 +336,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn identify_terminal(&mut self, intermediate: Option<char>) {
-        log!("Unhandled identify_terminal: {:?}", intermediate);
+        log!("Unhandled identify terminal: {:?}", intermediate);
     }
 
     fn device_status(&mut self, status: usize) {
@@ -383,6 +388,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn linefeed(&mut self) {
+        if CONFIG.auto_crnl.load(Ordering::Relaxed) {
+            self.carriage_return();
+        }
+
         if self.cursor.row == self.scroll_region.1 {
             self.scroll_up(1);
         } else if self.cursor.row < self.buffer.height() - 1 {
@@ -392,9 +401,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn bell(&mut self) {
         log!("Bell triggered!");
-        if let Some(handler) = CONFIG.bell_handler.lock().as_ref() {
-            handler();
-        }
+        CONFIG.bell_handler.lock().map(|handler| handler());
     }
 
     fn substitute(&mut self) {
@@ -469,14 +476,17 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn save_cursor_position(&mut self) {
+        log!("Save cursor position");
         self.saved_cursor = self.cursor;
     }
 
     fn restore_cursor_position(&mut self) {
+        log!("Restore cursor position");
         self.cursor = self.saved_cursor;
     }
 
     fn clear_line(&mut self, mode: LineClearMode) {
+        log!("Clear line: {:?}", mode);
         let template = self.attribute_template.clear();
         match mode {
             LineClearMode::Right => {
@@ -498,6 +508,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clear_screen(&mut self, mode: ClearMode) {
+        log!("Clear screen: {:?}", mode);
         let template = self.attribute_template.clear();
         match mode {
             ClearMode::Above => {
