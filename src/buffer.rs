@@ -149,7 +149,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    #[inline]
     pub fn flush(&mut self) {
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {
@@ -241,13 +240,13 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         for _ in 0..count {
             if is_up {
                 let row = self.buffer.remove(top).unwrap();
-                if bottom >= self.height() && !self.alt_screen_mode {
+                if !self.alt_screen_mode && bottom == self.height() - 1 {
                     self.above_buffer.push(row);
                 }
                 self.buffer.insert(bottom, new_row.clone());
             } else {
                 let row = self.buffer.remove(bottom).unwrap();
-                if top <= 1 && !self.alt_screen_mode {
+                if !self.alt_screen_mode && top == 0 {
                     self.below_buffer.push(row);
                 }
                 self.buffer.insert(top, new_row.clone());

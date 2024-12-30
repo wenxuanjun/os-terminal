@@ -8,7 +8,7 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 
 ![](screenshot.png)
 
-This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --release --example terminal --features=truetype` (Linux only). It will execute `bash` by default.
+This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --release --example terminal --features=truetype` (Linux only).
 
 ## Features
 
