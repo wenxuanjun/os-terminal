@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -20,13 +20,13 @@ lto = true
 opt-level = 3
 
 [dependencies]
-bitflags = "2.6.0"
+bitflags = "2.8.0"
 spin = "0.9.8"
 pc-keyboard = "0.8.0"
 unicode-width = "0.2.0"
 
 [dependencies.vte]
-version = "0.13.0"
+version = "0.14.1"
 features = ["ansi"]
 
 [dependencies.ab_glyph]
@@ -56,7 +56,7 @@ version = "0.29.0"
 features = ["term", "process", "fs"]
 
 [dev-dependencies.winit]
-version = "0.30.7"
+version = "0.30.8"
 features = ["rwh_06", "x11", "wayland"]
 default-features = false
 

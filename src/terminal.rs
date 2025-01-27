@@ -118,9 +118,7 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        for &byte in bstr {
-            self.performer.advance(&mut self.inner, byte);
-        }
+        self.performer.advance(&mut self.inner, bstr);
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
         }
@@ -141,10 +139,10 @@ impl<D: DrawTarget> Terminal<D> {
 
         match event {
             KeyboardEvent::SetColorScheme(index) => self.set_color_scheme(index),
-            KeyboardEvent::ScrollUp => self.inner.scroll_history_up(1),
-            KeyboardEvent::ScrollDown => self.inner.scroll_history_down(1),
-            KeyboardEvent::ScrollPageUp => self.inner.scroll_history_up(self.rows()),
-            KeyboardEvent::ScrollPageDown => self.inner.scroll_history_down(self.rows()),
+            KeyboardEvent::ScrollUp => self.inner.scroll_history(1, true),
+            KeyboardEvent::ScrollDown => self.inner.scroll_history(1, false),
+            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(self.rows(), true),
+            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(self.rows(), false),
             _ => {}
         }
         None
@@ -228,14 +226,11 @@ impl<D: DrawTarget> TerminalInner<D> {
         self.buffer.write(row, column, origin_cell);
     }
 
-    fn scroll_history_up(&mut self, count: usize) {
-        log!("Scroll up with buffer: {}", count);
-        self.buffer.scroll_history(count, true);
-    }
-
-    fn scroll_history_down(&mut self, count: usize) {
-        log!("Scroll down with buffer: {}", count);
-        self.buffer.scroll_history(count, false);
+    fn scroll_history(&mut self, count: usize, is_up: bool) {
+        self.buffer.scroll_history(count, is_up);
+        if CONFIG.auto_flush.load(Ordering::Relaxed) {
+            self.buffer.flush();
+        }
     }
 
     fn swap_alt_screen(&mut self) {
