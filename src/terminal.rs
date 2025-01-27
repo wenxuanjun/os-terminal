@@ -118,7 +118,9 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        self.performer.advance(&mut self.inner, bstr);
+        for &byte in bstr {
+            self.performer.advance(&mut self.inner, byte);
+        }
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
         }
