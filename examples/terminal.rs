@@ -15,12 +15,12 @@ use nix::libc::{ioctl, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
 use os_terminal::font::TrueTypeFont;
-use os_terminal::{DrawTarget, Rgb, Terminal};
+use os_terminal::{DrawTarget, MouseInput, Rgb, Terminal};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, Ime, WindowEvent};
+use winit::event::{ElementState, Ime, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
@@ -34,6 +34,7 @@ fn main() {
     let terminal = {
         let mut terminal = Terminal::new(display);
         terminal.set_auto_flush(false);
+        terminal.set_scroll_speed(5.0);
         terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
 
         let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
@@ -243,6 +244,15 @@ impl ApplicationHandler for App {
                             self.redraw_event_proxy.send_event(()).unwrap();
                         }
                         _ => {}
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if window_id == window.id() {
+                    if let MouseScrollDelta::LineDelta(_, lines) = delta {
+                        let mut terminal = self.terminal.lock().unwrap();
+                        terminal.handle_mouse(MouseInput::Scroll(lines));
+                        self.redraw_event_proxy.send_event(()).unwrap();
                     }
                 }
             }

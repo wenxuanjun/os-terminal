@@ -13,6 +13,7 @@ mod color;
 mod config;
 mod graphic;
 mod keyboard;
+mod mouse;
 mod palette;
 mod terminal;
 
@@ -21,5 +22,6 @@ pub mod font;
 pub use color::Rgb;
 pub use graphic::DrawTarget;
 pub use keyboard::KeyboardManager;
+pub use mouse::MouseInput;
 pub use palette::Palette;
 pub use terminal::Terminal;

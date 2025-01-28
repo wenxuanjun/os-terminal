@@ -4,6 +4,7 @@ use pc_keyboard::KeyCode::{self, *};
 use pc_keyboard::{DecodedKey, Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
 
+#[derive(Debug)]
 pub enum KeyboardEvent {
     AnsiString(String),
     SetColorScheme(usize),

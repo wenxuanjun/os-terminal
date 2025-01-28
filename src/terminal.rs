@@ -18,6 +18,7 @@ use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
+use crate::mouse::{MouseEvent, MouseInput, MouseManager};
 use crate::palette::Palette;
 
 #[derive(Default)]
@@ -81,6 +82,7 @@ pub struct TerminalInner<D: DrawTarget> {
     attribute_template: Cell,
     buffer: TerminalBuffer<D>,
     keyboard: KeyboardManager,
+    mouse: MouseManager,
     scroll_region: (usize, usize),
 }
 
@@ -99,6 +101,7 @@ impl<D: DrawTarget> Terminal<D> {
                 attribute_template: Cell::default(),
                 buffer: TerminalBuffer::new(graphic),
                 keyboard: KeyboardManager::default(),
+                mouse: MouseManager::default(),
                 scroll_region: (0, 0),
             },
         }
@@ -128,6 +131,17 @@ impl<D: DrawTarget> Terminal<D> {
             self.flush();
         }
     }
+}
+
+impl<D: DrawTarget> Terminal<D> {
+    pub fn handle_mouse(&mut self, input: MouseInput) {
+        let event = self.inner.mouse.handle_mouse(input);
+
+        match event {
+            MouseEvent::Scroll(lines) => self.inner.scroll_history(lines),
+            _ => {}
+        }
+    }
 
     pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
         let event = self.inner.keyboard.handle_keyboard(scancode);
@@ -141,10 +155,10 @@ impl<D: DrawTarget> Terminal<D> {
 
         match event {
             KeyboardEvent::SetColorScheme(index) => self.set_color_scheme(index),
-            KeyboardEvent::ScrollUp => self.inner.scroll_history(1, true),
-            KeyboardEvent::ScrollDown => self.inner.scroll_history(1, false),
-            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(self.rows(), true),
-            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(self.rows(), false),
+            KeyboardEvent::ScrollUp => self.inner.scroll_history(1),
+            KeyboardEvent::ScrollDown => self.inner.scroll_history(-1),
+            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(self.rows() as isize),
+            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(-(self.rows() as isize)),
             _ => {}
         }
         None
@@ -170,6 +184,15 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn set_natural_scroll(&mut self, mode: bool) {
         self.inner.keyboard.set_natural_scroll(mode);
+        self.inner.mouse.set_natural_scroll(mode);
+    }
+
+    pub fn set_scroll_speed(&mut self, speed: f32) {
+        if speed <= 0.0 {
+            log!("Scroll speed must be positive!");
+            return;
+        }
+        self.inner.mouse.set_scroll_speed(speed);
     }
 
     pub fn set_auto_crnl(&mut self, auto_crnl: bool) {
@@ -228,8 +251,8 @@ impl<D: DrawTarget> TerminalInner<D> {
         self.buffer.write(row, column, origin_cell);
     }
 
-    fn scroll_history(&mut self, count: usize, is_up: bool) {
-        self.buffer.scroll_history(count, is_up);
+    fn scroll_history(&mut self, count: isize) {
+        self.buffer.scroll_history(count);
         if CONFIG.auto_flush.load(Ordering::Relaxed) {
             self.buffer.flush();
         }
@@ -421,13 +444,13 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn scroll_up(&mut self, count: usize) {
         let region = self.scroll_region;
         self.buffer
-            .scroll(count, self.attribute_template, true, region);
+            .scroll(count as isize, self.attribute_template, region);
     }
 
     fn scroll_down(&mut self, count: usize) {
         let region = self.scroll_region;
         self.buffer
-            .scroll(count, self.attribute_template, false, region);
+            .scroll(-(count as isize), self.attribute_template, region);
     }
 
     fn insert_blank_lines(&mut self, count: usize) {

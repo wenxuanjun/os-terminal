@@ -207,7 +207,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     #[inline]
     pub fn back_to_latest(&mut self) {
         if !self.alt_screen_mode {
-            self.scroll_history(self.below_buffer.len(), true);
+            self.scroll_history(self.below_buffer.len() as isize);
         }
     }
 
@@ -227,18 +227,12 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn scroll(
-        &mut self,
-        count: usize,
-        cell: Cell,
-        is_up: bool,
-        scrolling_region: (usize, usize),
-    ) {
-        let (top, bottom) = scrolling_region;
+    pub fn scroll(&mut self, count: isize, cell: Cell, region: (usize, usize)) {
+        let (top, bottom) = region;
         let new_row = vec![cell; self.width()];
 
         for _ in 0..count {
-            if is_up {
+            if count.is_positive() {
                 let row = self.buffer.remove(top).unwrap();
                 if !self.alt_screen_mode && bottom == self.height() - 1 {
                     self.above_buffer.push(row);
@@ -254,19 +248,18 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
     }
 
-    pub fn scroll_history(&mut self, count: usize, is_up: bool) {
+    pub fn scroll_history(&mut self, count: isize) {
         if self.alt_screen_mode {
             return;
         }
-
-        let moves = if is_up {
-            count.min(self.below_buffer.len())
-        } else {
-            count.min(self.above_buffer.len())
+    
+        let moves = match count.is_positive() {
+            true => count.unsigned_abs().min(self.below_buffer.len()),
+            false => count.unsigned_abs().min(self.above_buffer.len()),
         };
-
+    
         for _ in 0..moves {
-            if is_up {
+            if count.is_positive() {
                 let row = self.buffer.pop_front().unwrap();
                 self.above_buffer.push(row);
                 self.buffer.push_back(self.below_buffer.pop().unwrap());
