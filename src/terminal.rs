@@ -1,9 +1,12 @@
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::mem::swap;
+use core::ops::Range;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
+use pc_keyboard::KeyCode;
 
 use vte::ansi::{Attr, Color as AnsiColor, NamedMode, Rgb};
 use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
@@ -83,13 +86,13 @@ pub struct TerminalInner<D: DrawTarget> {
     buffer: TerminalBuffer<D>,
     keyboard: KeyboardManager,
     mouse: MouseManager,
-    scroll_region: (usize, usize),
+    scroll_region: Range<usize>,
 }
 
 impl<D: DrawTarget> Terminal<D> {
     pub fn new(display: D) -> Self {
         let mut graphic = Graphic::new(display);
-        graphic.clear((0, 0), graphic.size(), Cell::default());
+        graphic.clear(Cell::default());
 
         Self {
             performer: Processor::new(),
@@ -102,7 +105,7 @@ impl<D: DrawTarget> Terminal<D> {
                 buffer: TerminalBuffer::new(graphic),
                 keyboard: KeyboardManager::default(),
                 mouse: MouseManager::default(),
-                scroll_region: (0, 0),
+                scroll_region: Default::default(),
             },
         }
     }
@@ -121,9 +124,7 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        for &byte in bstr {
-            self.performer.advance(&mut self.inner, byte);
-        }
+        self.performer.advance(&mut self.inner, bstr);
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
         }
@@ -134,34 +135,50 @@ impl<D: DrawTarget> Terminal<D> {
 }
 
 impl<D: DrawTarget> Terminal<D> {
-    pub fn handle_mouse(&mut self, input: MouseInput) {
-        let event = self.inner.mouse.handle_mouse(input);
-
-        match event {
-            MouseEvent::Scroll(lines) => self.inner.scroll_history(lines),
-            _ => {}
-        }
-    }
-
     pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
         let event = self.inner.keyboard.handle_keyboard(scancode);
 
         if let KeyboardEvent::AnsiString(s) = event {
             if !self.inner.buffer.is_latest() {
-                self.inner.buffer.back_to_latest();
+                self.inner.buffer.goto_latest();
             }
             return Some(s);
         }
 
         match event {
             KeyboardEvent::SetColorScheme(index) => self.set_color_scheme(index),
-            KeyboardEvent::ScrollUp => self.inner.scroll_history(1),
-            KeyboardEvent::ScrollDown => self.inner.scroll_history(-1),
-            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(self.rows() as isize),
-            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(-(self.rows() as isize)),
+            KeyboardEvent::ScrollUp => self.inner.scroll_history(-1),
+            KeyboardEvent::ScrollDown => self.inner.scroll_history(1),
+            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(-(self.rows() as isize)),
+            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(self.rows() as isize),
             _ => {}
         }
         None
+    }
+
+    pub fn handle_mouse(&mut self, input: MouseInput) -> Option<Vec<String>> {
+        if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+            match self.inner.mouse.handle_mouse(input) {
+                MouseEvent::Scroll(lines) => self.inner.scroll_history(lines),
+                _ => {}
+            }
+            return None;
+        }
+
+        match self.inner.mouse.handle_mouse(input) {
+            MouseEvent::Scroll(lines) => {
+                let key = if lines > 0 {
+                    KeyCode::ArrowUp
+                } else {
+                    KeyCode::ArrowDown
+                };
+                (0..lines.unsigned_abs())
+                    .flat_map(|_| self.inner.keyboard.simulate_key(key))
+                    .collect::<Vec<_>>()
+                    .into()
+            }
+            _ => None,
+        }
     }
 }
 
@@ -182,11 +199,6 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.resize_history(size);
     }
 
-    pub fn set_natural_scroll(&mut self, mode: bool) {
-        self.inner.keyboard.set_natural_scroll(mode);
-        self.inner.mouse.set_natural_scroll(mode);
-    }
-
     pub fn set_scroll_speed(&mut self, speed: f32) {
         if speed <= 0.0 {
             log!("Scroll speed must be positive!");
@@ -202,7 +214,7 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         let (font_width, font_height) = font_manager.size();
         self.inner.buffer.update_size(font_width, font_height);
-        self.inner.scroll_region = (0, self.inner.buffer.height() - 1);
+        self.inner.scroll_region = 0..self.inner.buffer.height() - 1;
         self.inner.reset_state();
         *CONFIG.font_manager.lock() = Some(font_manager);
     }
@@ -213,8 +225,8 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.full_flush();
     }
 
-    pub fn set_custom_color_scheme(&mut self, palette: Palette) {
-        *CONFIG.color_scheme.lock() = ColorScheme::from_palette(&palette);
+    pub fn set_custom_color_scheme(&mut self, palette: &Palette) {
+        *CONFIG.color_scheme.lock() = ColorScheme::from(palette);
         self.inner.attribute_template = Cell::default();
         self.inner.buffer.full_flush();
     }
@@ -351,7 +363,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn move_down(&mut self, rows: usize) {
         log!("Move down: {}", rows);
-        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as _;
+        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as i32;
         self.goto(goto_line, self.cursor.column);
     }
 
@@ -412,7 +424,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             self.carriage_return();
         }
 
-        if self.cursor.row == self.scroll_region.1 {
+        if self.cursor.row == self.scroll_region.end {
             self.scroll_up(1);
         } else if self.cursor.row < self.buffer.height() - 1 {
             self.cursor.row += 1;
@@ -442,15 +454,19 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn scroll_up(&mut self, count: usize) {
-        let region = self.scroll_region;
-        self.buffer
-            .scroll(count as isize, self.attribute_template, region);
+        self.buffer.scroll_region(
+            -(count as isize),
+            self.attribute_template,
+            self.scroll_region.clone(),
+        );
     }
 
     fn scroll_down(&mut self, count: usize) {
-        let region = self.scroll_region;
-        self.buffer
-            .scroll(-(count as isize), self.attribute_template, region);
+        self.buffer.scroll_region(
+            count as isize,
+            self.attribute_template,
+            self.scroll_region.clone(),
+        );
     }
 
     fn insert_blank_lines(&mut self, count: usize) {
@@ -582,7 +598,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn reverse_index(&mut self) {
         log!("Reverse index");
-        if self.cursor.row == self.scroll_region.0 {
+        if self.cursor.row == self.scroll_region.start {
             self.scroll_down(1);
         } else {
             self.cursor.row -= 1;
@@ -712,8 +728,8 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             return;
         }
 
-        self.scroll_region.0 = min(top, self.buffer.height()) - 1;
-        self.scroll_region.1 = min(bottom, self.buffer.height()) - 1;
+        self.scroll_region.start = min(top, self.buffer.height()) - 1;
+        self.scroll_region.end = min(bottom, self.buffer.height()) - 1;
         self.goto(0, 0);
     }
 

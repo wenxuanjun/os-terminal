@@ -24,17 +24,6 @@ pub struct ContentInfo {
     pub wide: bool,
 }
 
-impl ContentInfo {
-    pub fn new(content: char, bold: bool, italic: bool, wide: bool) -> Self {
-        Self {
-            content,
-            bold,
-            italic,
-            wide,
-        }
-    }
-}
-
 pub trait FontManager: Send {
     fn size(&self) -> (usize, usize);
     fn rasterize(&mut self, info: ContentInfo) -> Rasterized;

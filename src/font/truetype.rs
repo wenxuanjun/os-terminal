@@ -17,18 +17,16 @@ impl TrueTypeFont {
     pub fn new(font_size: f32, font_bytes: &'static [u8]) -> Self {
         let font = FontRef::try_from_slice(font_bytes).unwrap();
         let font_size = font.pt_to_px_scale(font_size).unwrap();
+        let scaled_font = font.as_scaled(font_size);
 
-        let line_height = font.as_scaled(font_size).height();
-        let base_line_offset = font.as_scaled(font_size).ascent();
-
-        let raster_height = line_height as usize;
-        let raster_width = (line_height / 2.0) as usize;
+        let line_height = scaled_font.height();
+        let base_line_offset = scaled_font.ascent();
 
         Self {
             font,
             italic_font: None,
-            raster_height,
-            raster_width,
+            raster_height: line_height as usize,
+            raster_width: (line_height / 2.0) as usize,
             font_size,
             base_line_offset,
             bitmap_cache: BTreeMap::new(),
@@ -48,11 +46,11 @@ impl FontManager for TrueTypeFont {
 
     fn rasterize(&mut self, info: ContentInfo) -> Rasterized {
         Rasterized::Vec(self.bitmap_cache.entry(info.clone()).or_insert_with(|| {
-            let select_font = if info.italic {
-                self.italic_font.as_mut().unwrap_or(&mut self.font)
-            } else {
-                &mut self.font
-            };
+            let select_font = self
+                .italic_font
+                .as_mut()
+                .filter(|_| info.italic)
+                .unwrap_or(&mut self.font);
 
             let font_weight = if info.bold { 700.0 } else { 400.0 };
             select_font.set_variation(b"wght", font_weight);
@@ -73,8 +71,8 @@ impl FontManager for TrueTypeFont {
                     let x = x_offset + x as isize;
                     let y = y_offset + y as isize;
 
-                    if (x >= 0 && x < actual_width as isize)
-                        && (y >= 0 && y < self.raster_height as isize)
+                    if (0..actual_width as isize).contains(&x)
+                        && (0..self.raster_height as isize).contains(&y)
                     {
                         letter_bitmap[y as usize][x as usize] = (c * 255.0) as u8;
                     }

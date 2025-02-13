@@ -1,5 +1,4 @@
 use crate::color::Rgb;
-use spin::Lazy;
 
 pub const DEFAULT_PALETTE_INDEX: usize = 0;
 
@@ -10,88 +9,82 @@ pub struct Palette {
 }
 
 impl Palette {
-    fn build(pair: (&str, &str), ansi_colors: [&str; 16]) -> Self {
+    const fn build(pair: (u32, u32), colors: [u32; 16]) -> Self {
         Self {
             foreground: Self::hex_to_rgb(pair.0),
             background: Self::hex_to_rgb(pair.1),
-            ansi_colors: ansi_colors.map(Self::hex_to_rgb),
+            ansi_colors: {
+                let mut ansi_colors = [(0, 0, 0); 16];
+                let mut i = 0;
+                while i < 16 {
+                    ansi_colors[i] = Self::hex_to_rgb(colors[i]);
+                    i += 1;
+                }
+                ansi_colors
+            },
         }
     }
 
-    fn hex_to_rgb(hex: &str) -> Rgb {
-        let hex = hex.trim_start_matches('#');
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-        (r, g, b)
+    const fn hex_to_rgb(hex: u32) -> Rgb {
+        ((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
     }
 }
 
-pub static PALETTE: Lazy<[Palette; 8]> = Lazy::new(|| {
-    [
-        Palette::build(
-            ("#f5f5f5", "#151515"),
-            [
-                "#151515", "#ac4142", "#90a959", "#f4bf75", "#6a9fb5", "#aa759f", "#75b5aa",
-                "#d0d0d0", "#505050", "#ac4142", "#90a959", "#f4bf75", "#6a9fb5", "#aa759f",
-                "#75b5aa", "#f5f5f5",
-            ],
-        ),
-        Palette::build(
-            ("#839496", "#002b36"),
-            [
-                "#002b36", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198",
-                "#eee8d5", "#073642", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4",
-                "#93a1a1", "#fdf6e3",
-            ],
-        ),
-        Palette::build(
-            ("#ffffff", "#300924"),
-            [
-                "#2e3436", "#cc0000", "#4e9a06", "#c4a000", "#3465a4", "#75507b", "#06989a",
-                "#d3d7cf", "#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8",
-                "#34e2e2", "#eeeeec",
-            ],
-        ),
-        Palette::build(
-            ("#f8f8f2", "#121212"),
-            [
-                "#181d1e", "#f92672", "#a6e22e", "#fd971f", "#66d9ef", "#9e6ffe", "#5e7175",
-                "#cccccc", "#505354", "#ff669d", "#beed5f", "#e6db74", "#66d9ef", "#9e6ffe",
-                "#a3babf", "#f8f8f2",
-            ],
-        ),
-        Palette::build(
-            ("#00bb00", "#001100"),
-            [
-                "#001100", "#007700", "#00bb00", "#007700", "#009900", "#00bb00", "#005500",
-                "#00bb00", "#007700", "#007700", "#00bb00", "#007700", "#009900", "#00bb00",
-                "#005500", "#00ff00",
-            ],
-        ),
-        Palette::build(
-            ("#979db4", "#202746"),
-            [
-                "#202746", "#c94922", "#ac9739", "#c08b30", "#3d8fd1", "#6679cc", "#22a2c9",
-                "#979db4", "#6b7394", "#c94922", "#ac9739", "#c08b30", "#3d8fd1", "#6679cc",
-                "#22a2c9", "#f5f7ff",
-            ],
-        ),
-        Palette::build(
-            ("#657b83", "#fdf6e3"),
-            [
-                "#002b36", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198",
-                "#eee8d5", "#073642", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4",
-                "#93a1a1", "#fdf6e3",
-            ],
-        ),
-        Palette::build(
-            ("#26232a", "#efecf4"),
-            [
-                "#19171c", "#be4678", "#2a9292", "#a06e3b", "#576ddb", "#955ae7", "#398bc6",
-                "#8b8792", "#585260", "#c9648e", "#34b2b2", "#bc8249", "#788ae2", "#ac7eed",
-                "#599ecf", "#efecf4",
-            ],
-        ),
-    ]
-});
+pub const PALETTE: [Palette; 8] = [
+    Palette::build(
+        (0xf5f5f5, 0x151515),
+        [
+            0x151515, 0xac4142, 0x90a959, 0xf4bf75, 0x6a9fb5, 0xaa759f, 0x75b5aa, 0xd0d0d0,
+            0x505050, 0xac4142, 0x90a959, 0xf4bf75, 0x6a9fb5, 0xaa759f, 0x75b5aa, 0xf5f5f5,
+        ],
+    ),
+    Palette::build(
+        (0x839496, 0x002b36),
+        [
+            0x002b36, 0xdc322f, 0x859900, 0xb58900, 0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5,
+            0x073642, 0xcb4b16, 0x586e75, 0x657b83, 0x839496, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
+        ],
+    ),
+    Palette::build(
+        (0xffffff, 0x300924),
+        [
+            0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf,
+            0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec,
+        ],
+    ),
+    Palette::build(
+        (0xf8f8f2, 0x121212),
+        [
+            0x181d1e, 0xf92672, 0xa6e22e, 0xfd971f, 0x66d9ef, 0x9e6ffe, 0x5e7175, 0xcccccc,
+            0x505354, 0xff669d, 0xbeed5f, 0xe6db74, 0x66d9ef, 0x9e6ffe, 0xa3babf, 0xf8f8f2,
+        ],
+    ),
+    Palette::build(
+        (0x00bb00, 0x001100),
+        [
+            0x001100, 0x007700, 0x00bb00, 0x007700, 0x009900, 0x00bb00, 0x005500, 0x00bb00,
+            0x007700, 0x007700, 0x00bb00, 0x007700, 0x009900, 0x00bb00, 0x005500, 0x00ff00,
+        ],
+    ),
+    Palette::build(
+        (0x979db4, 0x202746),
+        [
+            0x202746, 0xc94922, 0xac9739, 0xc08b30, 0x3d8fd1, 0x6679cc, 0x22a2c9, 0x979db4,
+            0x6b7394, 0xc94922, 0xac9739, 0xc08b30, 0x3d8fd1, 0x6679cc, 0x22a2c9, 0xf5f7ff,
+        ],
+    ),
+    Palette::build(
+        (0x657b83, 0xfdf6e3),
+        [
+            0x002b36, 0xdc322f, 0x859900, 0xb58900, 0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5,
+            0x073642, 0xcb4b16, 0x586e75, 0x657b83, 0x839496, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
+        ],
+    ),
+    Palette::build(
+        (0x26232a, 0xefecf4),
+        [
+            0x19171c, 0xbe4678, 0x2a9292, 0xa06e3b, 0x576ddb, 0x955ae7, 0x398bc6, 0x8b8792,
+            0x585260, 0xc9648e, 0x34b2b2, 0xbc8249, 0x788ae2, 0xac7eed, 0x599ecf, 0xefecf4,
+        ],
+    ),
+];

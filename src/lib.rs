@@ -1,5 +1,5 @@
 #![no_std]
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 
 #[macro_use]
 extern crate alloc;
@@ -22,6 +22,6 @@ pub mod font;
 pub use color::Rgb;
 pub use graphic::DrawTarget;
 pub use keyboard::KeyboardManager;
-pub use mouse::MouseInput;
+pub use mouse::{MouseButton, MouseInput};
 pub use palette::Palette;
 pub use terminal::Terminal;

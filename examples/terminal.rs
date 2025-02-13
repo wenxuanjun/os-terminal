@@ -1,4 +1,5 @@
 use std::env;
+use std::error::Error;
 use std::ffi::CString;
 use std::num::NonZeroU32;
 use std::os::fd::AsFd;
@@ -25,9 +26,9 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 
-const DISPLAY_SIZE: (usize, usize) = (1024, 768);
+const DISPLAY_SIZE: (usize, usize) = (1029, 768);
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let display = Display::default();
     let buffer = display.buffer.clone();
 
@@ -44,11 +45,11 @@ fn main() {
         Arc::new(Mutex::new(terminal))
     };
 
-    let OpenptyResult { master, slave } = openpty(None, None).unwrap();
+    let OpenptyResult { master, slave } = openpty(None, None)?;
 
     match unsafe { fork() } {
         Ok(ForkResult::Child) => {
-            close(master.into_raw_fd()).unwrap();
+            close(master.into_raw_fd())?;
 
             let win_size = {
                 let terminal = terminal.lock().unwrap();
@@ -61,22 +62,22 @@ fn main() {
             };
 
             unsafe {
-                setsid().unwrap();
+                setsid()?;
                 ioctl(slave.as_raw_fd(), TIOCSCTTY, 0);
                 ioctl(slave.as_raw_fd(), TIOCSWINSZ, &win_size);
             }
 
-            dup2(slave.as_raw_fd(), 0).unwrap();
-            dup2(slave.as_raw_fd(), 1).unwrap();
-            dup2(slave.as_raw_fd(), 2).unwrap();
+            dup2(slave.as_raw_fd(), 0)?;
+            dup2(slave.as_raw_fd(), 1)?;
+            dup2(slave.as_raw_fd(), 2)?;
 
             let shell = env::var("SHELL").unwrap_or("bash".into());
-            let _ = execvp::<CString>(&CString::new(shell).unwrap(), &[]);
+            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
         }
         Ok(ForkResult::Parent { .. }) => {
-            close(slave.into_raw_fd()).unwrap();
+            close(slave.into_raw_fd())?;
 
-            let event_loop = EventLoop::new().unwrap();
+            let event_loop = EventLoop::new()?;
             let redraw_event_proxy = event_loop.create_proxy();
             let (ansi_sender, ansi_receiver) = unbounded();
 
@@ -113,10 +114,12 @@ fn main() {
                 }
             });
 
-            event_loop.run_app(&mut app).unwrap();
+            event_loop.run_app(&mut app)?;
         }
         Err(_) => eprintln!("Fork failed"),
     }
+
+    Ok(())
 }
 
 struct Display {
@@ -250,8 +253,16 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 if window_id == window.id() {
                     if let MouseScrollDelta::LineDelta(_, lines) = delta {
-                        let mut terminal = self.terminal.lock().unwrap();
-                        terminal.handle_mouse(MouseInput::Scroll(lines));
+                        if let Some(ansi_strings) = self
+                            .terminal
+                            .lock()
+                            .unwrap()
+                            .handle_mouse(MouseInput::Scroll(lines))
+                        {
+                            for ansi_string in ansi_strings {
+                                self.ansi_sender.send(ansi_string).unwrap();
+                            }
+                        }
                         self.redraw_event_proxy.send_event(()).unwrap();
                     }
                 }

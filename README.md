@@ -22,6 +22,8 @@ This screenshot shows the result of running `fastfetch` in the example terminal.
 
 ## Usage
 
+### Basic
+
 Create a display wrapper to wrap your framebuffer and implement the `DrawTarget` trait for it.
 
 ```rust
@@ -48,12 +50,17 @@ impl DrawTarget for Display {
 }
 ```
 
-Then you can create a terminal with a box-wrapped font manager.
+Then you can create a terminal with a box-wrapped font manager and write some text to it.
 
 ```rust
 let mut terminal = Terminal::new(display);
 terminal.set_font_manager(Box::new(BitmapFont));
+
+terminal.process(b"\x1b[31mHello, world!\x1b[0m");
+terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
+
+### Keyboard
 
 Now you can redirect the keyboard events to the terminal in scancode format (currently only Scan Code Set1 and North American standard English keyboard layout are supported) to let the terminal process shortcuts or get escaped strings so you can pass it to your shell.
 
@@ -70,10 +77,23 @@ for scancode in scancodes.iter() {
 
 And then you can advance the terminal state with the escaped string from the output of your shell.
 
+### Mouse
+
+Unlike keyboard, you need to pass in the `MouseInput` enumeration specified by `os-terminal` instead of scancode.
+
+For example, you can pass in a mouse scroll event like this:
+
 ```rust
-terminal.process(b"\x1b[31mHello, world!\x1b[0m");
-terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
+use os_terminal::MouseInput;
+
+terminal.handle_mouse(MouseInput::Scroll(lines));
 ```
+
+You can use `terminal.set_scroll_speed(speed)` to set a positive mouse scroll speed multiplier.
+
+### Font
+
+The default enabled `BitmapFont` is based on the pre-rendered noto sans mono font, and does not support setting the font size, suitable for simple usage scenarios where you don't want to pass in a font file.
 
 To use truetype font, enable `truetype` feature and create a `TrueTypeFont` instance from a font file with size.
 
@@ -93,11 +113,15 @@ let font_manager = TrueTypeFont::new(10.0, font_buffer).with_italic_font(italic_
 terminal.set_font_manager(Box::new(font_manager));
 ```
 
+### Logger
+
 If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
 ```rust
 os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
 ```
+
+### Flush
 
 Default flush strategy is synchronous. If you need higher performance, you can disable the auto flush and flush manually when needed.
 
@@ -105,6 +129,8 @@ Default flush strategy is synchronous. If you need higher performance, you can d
 terminal.set_auto_flush(false);
 terminal.flush();
 ```
+
+### Themes
 
 The terminal comes with 8 built-in themes. You can switch to other themes manually by calling `terminal.set_color_scheme(index)`.
 
@@ -121,6 +147,8 @@ terminal.set_custom_color_scheme(palette);
 ```
 
 Note that this setting is temporary and you will need to re-execute `set_custom_color_scheme` if you switch to another theme.
+
+### Miscellaneous
 
 Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
 

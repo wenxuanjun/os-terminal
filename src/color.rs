@@ -64,10 +64,12 @@ impl ColorScheme {
         let palette = PALETTE
             .get(palette_index)
             .unwrap_or(&PALETTE[DEFAULT_PALETTE_INDEX]);
-        Self::from_palette(palette)
+        ColorScheme::from(palette)
     }
+}
 
-    pub fn from_palette(palette: &Palette) -> Self {
+impl From<&Palette> for ColorScheme {
+    fn from(palette: &Palette) -> Self {
         let mut colors = [(0, 0, 0); 256];
         colors[..16].copy_from_slice(&palette.ansi_colors);
 
