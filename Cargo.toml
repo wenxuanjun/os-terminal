@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -72,6 +72,6 @@ features = ["kms", "x11", "wayland"]
 default-features = false
 
 [features]
-default = ["bitmap"]
+default = ["bitmap", "truetype"]
 bitmap = ["dep:noto-sans-mono-bitmap"]
 truetype = ["dep:ab_glyph"]

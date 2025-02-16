@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use alloc::string::String;
-use alloc::vec::Vec;
 use core::mem::swap;
 use core::ops::Range;
 use core::sync::atomic::Ordering;
@@ -156,7 +155,7 @@ impl<D: DrawTarget> Terminal<D> {
         None
     }
 
-    pub fn handle_mouse(&mut self, input: MouseInput) -> Option<Vec<String>> {
+    pub fn handle_mouse(&mut self, input: MouseInput) -> Option<String> {
         if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
             match self.inner.mouse.handle_mouse(input) {
                 MouseEvent::Scroll(lines) => self.inner.scroll_history(lines),
@@ -174,7 +173,7 @@ impl<D: DrawTarget> Terminal<D> {
                 };
                 (0..lines.unsigned_abs())
                     .flat_map(|_| self.inner.keyboard.simulate_key(key))
-                    .collect::<Vec<_>>()
+                    .collect::<String>()
                     .into()
             }
             _ => None,
@@ -199,11 +198,7 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.buffer.resize_history(size);
     }
 
-    pub fn set_scroll_speed(&mut self, speed: f32) {
-        if speed <= 0.0 {
-            log!("Scroll speed must be positive!");
-            return;
-        }
+    pub fn set_scroll_speed(&mut self, speed: usize) {
         self.inner.mouse.set_scroll_speed(speed);
     }
 

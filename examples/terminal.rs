@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let terminal = {
         let mut terminal = Terminal::new(display);
         terminal.set_auto_flush(false);
-        terminal.set_scroll_speed(5.0);
+        terminal.set_scroll_speed(5);
         terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
 
         let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
@@ -253,15 +253,13 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 if window_id == window.id() {
                     if let MouseScrollDelta::LineDelta(_, lines) = delta {
-                        if let Some(ansi_strings) = self
+                        if let Some(ansi_string) = self
                             .terminal
                             .lock()
                             .unwrap()
-                            .handle_mouse(MouseInput::Scroll(lines))
+                            .handle_mouse(MouseInput::Scroll(lines as isize))
                         {
-                            for ansi_string in ansi_strings {
-                                self.ansi_sender.send(ansi_string).unwrap();
-                            }
+                            self.ansi_sender.send(ansi_string).unwrap();
                         }
                         self.redraw_event_proxy.send_event(()).unwrap();
                     }
