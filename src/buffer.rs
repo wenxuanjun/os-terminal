@@ -233,7 +233,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
     pub fn scroll_region(&mut self, count: isize, cell: Cell, region: Range<usize>) {
         let (top, bottom) = (region.start, region.end);
-        let new_row = vec![cell; self.width()];
 
         if count > 0 {
             for _ in 0..count.unsigned_abs() {
@@ -241,7 +240,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
                 if !self.alt_screen_mode && top == 0 {
                     self.below_buffer.push(row);
                 }
-                self.buffer.insert(top, new_row.clone());
+                self.buffer.insert(top, vec![cell; self.width()]);
             }
         } else {
             for _ in 0..count.unsigned_abs() {
@@ -249,7 +248,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
                 if !self.alt_screen_mode && bottom == self.height() - 1 {
                     self.above_buffer.push(row);
                 }
-                self.buffer.insert(bottom, new_row.clone());
+                self.buffer.insert(bottom, vec![cell; self.width()]);
             }
         }
     }

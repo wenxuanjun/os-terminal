@@ -487,14 +487,15 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn delete_chars(&mut self, count: usize) {
         log!("Delete chars: {}", count);
-        let (row, columns) = (self.cursor.row, self.buffer.width());
-        let count = min(count, columns - self.cursor.column - 1);
+        let (row, width) = (self.cursor.row, self.buffer.width());
+        let count = min(count, width - self.cursor.column - 1);
 
-        let template = self.attribute_template.clear();
-        for column in (self.cursor.column + count)..columns {
-            self.buffer
-                .write(row, column - count, self.buffer.read(row, column));
-            self.buffer.write(row, column, template);
+        for i in self.cursor.column..width - count {
+            self.buffer.write(row, i, self.buffer.read(row, i + count));
+        }
+
+        for i in width - count..width {
+            self.buffer.write(row, i, self.attribute_template.clear());
         }
     }
 

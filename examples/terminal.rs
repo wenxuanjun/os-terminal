@@ -1,18 +1,18 @@
-use std::env;
 use std::error::Error;
 use std::ffi::CString;
 use std::num::NonZeroU32;
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, IntoRawFd};
-use std::process;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use std::{env, process};
 
-use crossbeam_channel::{unbounded, Sender};
 use keycode::{KeyMap, KeyMapping};
 use nix::errno::Errno;
-use nix::libc::{ioctl, TIOCSCTTY, TIOCSWINSZ};
+use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
 use os_terminal::font::TrueTypeFont;
@@ -21,38 +21,34 @@ use os_terminal::{DrawTarget, MouseInput, Rgb, Terminal};
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, Ime, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event::{ElementState, Ime, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 
-const DISPLAY_SIZE: (usize, usize) = (1029, 768);
+const DISPLAY_SIZE: (usize, usize) = (1024, 768);
+const TOUCHPAD_SCROLL_MULTIPLIER: f32 = 0.25;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let display = Display::default();
-    let buffer = display.buffer.clone();
-
-    let terminal = {
-        let mut terminal = Terminal::new(display);
-        terminal.set_auto_flush(false);
-        terminal.set_scroll_speed(5);
-        terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
-
-        let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
-        terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
-        terminal.set_history_size(1000);
-
-        Arc::new(Mutex::new(terminal))
-    };
-
     let OpenptyResult { master, slave } = openpty(None, None)?;
 
     match unsafe { fork() } {
-        Ok(ForkResult::Child) => {
-            close(master.into_raw_fd())?;
+        Ok(ForkResult::Parent { .. }) => {
+            close(slave.into_raw_fd())?;
+
+            let display = Display::default();
+            let buffer = display.buffer.clone();
+
+            let mut terminal = Terminal::new(display);
+            terminal.set_auto_flush(false);
+            terminal.set_scroll_speed(5);
+            terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
+
+            let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
+            terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
+            terminal.set_history_size(1000);
 
             let win_size = {
-                let terminal = terminal.lock().unwrap();
                 Winsize {
                     ws_row: terminal.rows() as u16,
                     ws_col: terminal.columns() as u16,
@@ -60,49 +56,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ws_ypixel: DISPLAY_SIZE.1 as u16,
                 }
             };
-
             unsafe {
-                setsid()?;
-                ioctl(slave.as_raw_fd(), TIOCSCTTY, 0);
-                ioctl(slave.as_raw_fd(), TIOCSWINSZ, &win_size);
+                ioctl(master.as_raw_fd(), TIOCSWINSZ, &win_size);
             }
 
-            dup2(slave.as_raw_fd(), 0)?;
-            dup2(slave.as_raw_fd(), 1)?;
-            dup2(slave.as_raw_fd(), 2)?;
-
-            let shell = env::var("SHELL").unwrap_or("bash".into());
-            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
-        }
-        Ok(ForkResult::Parent { .. }) => {
-            close(slave.into_raw_fd())?;
-
             let event_loop = EventLoop::new()?;
-            let redraw_event_proxy = event_loop.create_proxy();
-            let (ansi_sender, ansi_receiver) = unbounded();
+            let (ansi_sender, ansi_receiver) = channel();
+            let terminal = Arc::new(Mutex::new(terminal));
+            let pending_draw = Arc::new(AtomicBool::new(false));
 
             let mut app = App::new(
                 ansi_sender,
                 buffer.clone(),
                 terminal.clone(),
-                redraw_event_proxy.clone(),
+                pending_draw.clone(),
             );
 
-            let master_raw_fd = master.as_raw_fd();
-
-            std::thread::spawn(move || {
-                let mut temp = [0u8; 1024];
-                loop {
-                    match read(master_raw_fd, &mut temp) {
-                        Ok(n) if n > 0 => {
-                            terminal.lock().unwrap().process(&temp[..n]);
-                            redraw_event_proxy.send_event(()).unwrap();
-                        }
-                        Ok(_) => break,
-                        Err(Errno::EIO) => process::exit(0),
-                        Err(e) => {
-                            eprintln!("Error reading from PTY: {:?}", e);
-                            process::exit(1)
+            std::thread::spawn({
+                let master = master.as_raw_fd();
+                move || {
+                    let mut temp = [0u8; 1024];
+                    loop {
+                        match read(master, &mut temp) {
+                            Ok(n) if n > 0 => {
+                                terminal.lock().unwrap().process(&temp[..n]);
+                                pending_draw.store(true, Ordering::Relaxed);
+                            }
+                            Ok(_) => break,
+                            Err(Errno::EIO) => process::exit(0),
+                            Err(e) => {
+                                eprintln!("Error reading from PTY: {:?}", e);
+                                process::exit(1)
+                            }
                         }
                     }
                 }
@@ -115,6 +100,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
             event_loop.run_app(&mut app)?;
+        }
+        Ok(ForkResult::Child) => {
+            close(master.into_raw_fd())?;
+
+            setsid()?;
+            dup2(slave.as_raw_fd(), 0)?;
+            dup2(slave.as_raw_fd(), 1)?;
+            dup2(slave.as_raw_fd(), 2)?;
+
+            let shell = env::var("SHELL").unwrap_or("bash".into());
+            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
         }
         Err(_) => eprintln!("Fork failed"),
     }
@@ -149,8 +145,8 @@ impl DrawTarget for Display {
 
     #[inline(always)]
     fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb) {
-        let value = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
-        self.buffer[y * self.width + x].store(value, Ordering::Relaxed);
+        let color = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
+        self.buffer[y * self.width + x].store(color, Ordering::Relaxed);
     }
 }
 
@@ -160,7 +156,8 @@ struct App {
     terminal: Arc<Mutex<Terminal<Display>>>,
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
-    redraw_event_proxy: EventLoopProxy<()>,
+    pending_draw: Arc<AtomicBool>,
+    scroll_accumulator: f32,
 }
 
 impl App {
@@ -168,7 +165,7 @@ impl App {
         ansi_sender: Sender<String>,
         buffer: Arc<Vec<AtomicU32>>,
         terminal: Arc<Mutex<Terminal<Display>>>,
-        redraw_event_proxy: EventLoopProxy<()>,
+        pending_draw: Arc<AtomicBool>,
     ) -> Self {
         Self {
             ansi_sender,
@@ -176,12 +173,40 @@ impl App {
             terminal,
             window: None,
             surface: None,
-            redraw_event_proxy,
+            pending_draw,
+            scroll_accumulator: 0.0,
         }
     }
 }
 
 impl ApplicationHandler for App {
+    fn new_events(&mut self, _: &ActiveEventLoop, _: StartCause) {
+        if !self.pending_draw.swap(false, Ordering::Relaxed) {
+            return;
+        }
+
+        self.terminal.lock().unwrap().flush();
+
+        if let Some(surface) = self.surface.as_mut() {
+            let mut surface_buffer = surface.buffer_mut().unwrap();
+            for (index, value) in self.buffer.iter().enumerate() {
+                surface_buffer[index] = value.load(Ordering::Relaxed);
+            }
+            surface_buffer.present().unwrap();
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let refresh_rate = event_loop
+            .primary_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .unwrap_or(60000);
+        let frame_duration = 1000.0 / (refresh_rate as f32 / 1000.0);
+
+        let duration = Duration::from_millis(frame_duration as u64);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + duration))
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let (width, height) = DISPLAY_SIZE;
         let attributes = WindowAttributes::default()
@@ -207,90 +232,61 @@ impl ApplicationHandler for App {
         self.surface = Some(surface);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        let window = self.window.as_ref().unwrap();
-
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::RedrawRequested => {
-                if window_id == window.id() {
-                    let surface = self.surface.as_mut().unwrap();
-                    self.terminal.lock().unwrap().flush();
-
-                    let mut surface_buffer = surface.buffer_mut().unwrap();
-                    for (index, value) in self.buffer.iter().enumerate() {
-                        surface_buffer[index] = value.load(Ordering::Relaxed);
-                    }
-                    surface_buffer.present().unwrap();
-                }
-            }
             WindowEvent::CloseRequested => {
-                if window_id == window.id() {
-                    event_loop.exit();
-                }
+                event_loop.exit();
             }
-            WindowEvent::Ime(ime) => {
-                if window_id == window.id() {
-                    match ime {
-                        Ime::Commit(text) => {
-                            self.ansi_sender.send(text).unwrap();
-                            self.redraw_event_proxy.send_event(()).unwrap();
-                        }
-                        _ => {}
-                    }
+            WindowEvent::Ime(ime) => match ime {
+                Ime::Commit(text) => {
+                    self.ansi_sender.send(text).unwrap();
                 }
-            }
+                _ => {}
+            },
             WindowEvent::MouseWheel { delta, .. } => {
-                if window_id == window.id() {
-                    if let MouseScrollDelta::LineDelta(_, lines) = delta {
+                self.scroll_accumulator += match delta {
+                    MouseScrollDelta::LineDelta(_, lines) => lines,
+                    MouseScrollDelta::PixelDelta(delta) => {
+                        delta.y as f32 * TOUCHPAD_SCROLL_MULTIPLIER
+                    }
+                };
+                if self.scroll_accumulator.abs() >= 1.0 {
+                    let lines = self.scroll_accumulator as isize;
+                    self.scroll_accumulator -= lines as f32;
+                    if let Some(ansi_string) = self
+                        .terminal
+                        .lock()
+                        .unwrap()
+                        .handle_mouse(MouseInput::Scroll(lines))
+                    {
+                        self.ansi_sender.send(ansi_string).unwrap();
+                    }
+                    self.pending_draw.store(true, Ordering::Relaxed);
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(evdev_code) = event.physical_key.to_scancode() {
+                    if let Ok(keymap) =
+                        KeyMap::from_key_mapping(KeyMapping::Evdev(evdev_code as u16))
+                    {
+                        // Windows scancode is 16-bit extended scancode
+                        let mut scancode = keymap.win;
+                        if event.state == ElementState::Released {
+                            scancode += 0x80;
+                        }
+                        if scancode >= 0xe000 {
+                            self.terminal.lock().unwrap().handle_keyboard(0xe0);
+                            scancode -= 0xe000;
+                        }
                         if let Some(ansi_string) = self
                             .terminal
                             .lock()
                             .unwrap()
-                            .handle_mouse(MouseInput::Scroll(lines as isize))
+                            .handle_keyboard(scancode as u8)
                         {
                             self.ansi_sender.send(ansi_string).unwrap();
                         }
-                        self.redraw_event_proxy.send_event(()).unwrap();
-                    }
-                }
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if window_id == window.id() {
-                    if let Some(evdev_code) = event.physical_key.to_scancode() {
-                        if let Ok(keymap) =
-                            KeyMap::from_key_mapping(KeyMapping::Evdev(evdev_code as u16))
-                        {
-                            // Windows scancode is 16-bit extended scancode
-                            let mut scancode = keymap.win;
-                            if event.state == ElementState::Released {
-                                scancode += 0x80;
-                            }
-                            if scancode >= 0xe000 {
-                                self.terminal.lock().unwrap().handle_keyboard(0xe0);
-                                scancode -= 0xe000;
-                            }
-                            if let Some(ansi_string) = self
-                                .terminal
-                                .lock()
-                                .unwrap()
-                                .handle_keyboard(scancode as u8)
-                            {
-                                self.ansi_sender.send(ansi_string).unwrap();
-                            }
-
-                            self.redraw_event_proxy.send_event(()).unwrap();
-                        }
+                        self.pending_draw.store(true, Ordering::Relaxed);
                     }
                 }
             }
