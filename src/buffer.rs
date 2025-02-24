@@ -24,11 +24,13 @@ impl<T> FixedStack<T> {
         Self { data, capacity }
     }
 
-    pub fn push(&mut self, item: T) {
+    pub fn push(&mut self, item: T) -> Option<T> {
+        let mut pop = None;
         if self.data.len() == self.capacity {
-            self.data.pop_front();
+            pop = self.data.pop_front();
         }
         self.data.push_back(item);
+        pop
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -114,12 +116,10 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn read(&self, row: usize, col: usize) -> Cell {
-        let row = row % self.height();
         self.buffer[row][col]
     }
 
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
-        let row = row % self.height();
         self.buffer[row][col] = cell;
     }
 
@@ -237,18 +237,30 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         if count > 0 {
             for _ in 0..count.unsigned_abs() {
                 let row = self.buffer.remove(bottom).unwrap();
+                let mut temp = None;
                 if !self.alt_screen_mode && top == 0 {
-                    self.below_buffer.push(row);
+                    temp = self.below_buffer.push(row);
                 }
-                self.buffer.insert(top, vec![cell; self.width()]);
+                if let Some(mut temp) = temp {
+                    temp.fill(cell);
+                    self.buffer.insert(top, temp);
+                } else {
+                    self.buffer.insert(top, vec![cell; self.width()]);
+                }
             }
         } else {
             for _ in 0..count.unsigned_abs() {
                 let row = self.buffer.remove(top).unwrap();
+                let mut temp = None;
                 if !self.alt_screen_mode && bottom == self.height() - 1 {
-                    self.above_buffer.push(row);
+                    temp = self.above_buffer.push(row);
                 }
-                self.buffer.insert(bottom, vec![cell; self.width()]);
+                if let Some(mut temp) = temp {
+                    temp.fill(cell);
+                    self.buffer.insert(bottom, temp);
+                } else {
+                    self.buffer.insert(bottom, vec![cell; self.width()])
+                };
             }
         }
     }

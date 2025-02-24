@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "os-terminal"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "ab_glyph",
  "bitflags 2.8.0",
