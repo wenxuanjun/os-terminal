@@ -7,7 +7,7 @@ use core::time::Duration;
 use core::{cmp::min, fmt};
 use pc_keyboard::KeyCode;
 
-use vte::ansi::{Attr, Color as AnsiColor, NamedMode, Rgb};
+use vte::ansi::{Attr, NamedMode, Rgb};
 use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
 use vte::ansi::{ClearMode, CursorShape, Processor, Timeout};
 use vte::ansi::{CursorStyle, Hyperlink, KeyboardModes};
@@ -15,7 +15,7 @@ use vte::ansi::{Handler, LineClearMode, Mode, NamedPrivateMode, PrivateMode};
 
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
-use crate::color::{Color, ColorScheme};
+use crate::color::ColorScheme;
 use crate::config::CONFIG;
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, Graphic};
@@ -28,7 +28,7 @@ pub struct DummySyncHandler;
 
 #[rustfmt::skip]
 impl Timeout for DummySyncHandler {
-    fn set_timeout(&mut self, _duration: Duration) {}
+    fn set_timeout(&mut self, _: Duration) {}
     fn clear_timeout(&mut self) {}
     fn pending_timeout(&self) -> bool { false }
 }
@@ -86,6 +86,8 @@ pub struct TerminalInner<D: DrawTarget> {
     keyboard: KeyboardManager,
     mouse: MouseManager,
     scroll_region: Range<usize>,
+    charsets: [StandardCharset; 4],
+    active_charset: CharsetIndex,
 }
 
 impl<D: DrawTarget> Terminal<D> {
@@ -105,6 +107,8 @@ impl<D: DrawTarget> Terminal<D> {
                 keyboard: KeyboardManager::default(),
                 mouse: MouseManager::default(),
                 scroll_region: Default::default(),
+                charsets: Default::default(),
+                active_charset: Default::default(),
             },
         }
     }
@@ -156,25 +160,20 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn handle_mouse(&mut self, input: MouseInput) -> Option<String> {
-        if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
-            match self.inner.mouse.handle_mouse(input) {
-                MouseEvent::Scroll(lines) => self.inner.scroll_history(lines),
-                _ => {}
-            }
-            return None;
-        }
-
         match self.inner.mouse.handle_mouse(input) {
             MouseEvent::Scroll(lines) => {
-                let key = if lines > 0 {
-                    KeyCode::ArrowUp
+                if self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+                    let key = if lines > 0 {
+                        KeyCode::ArrowUp
+                    } else {
+                        KeyCode::ArrowDown
+                    };
+                    let mapper = |_| self.inner.keyboard.simulate_key(key);
+                    Some((0..lines.unsigned_abs()).flat_map(mapper).collect())
                 } else {
-                    KeyCode::ArrowDown
-                };
-                (0..lines.unsigned_abs())
-                    .flat_map(|_| self.inner.keyboard.simulate_key(key))
-                    .collect::<String>()
-                    .into()
+                    self.inner.scroll_history(lines);
+                    None
+                }
             }
             _ => None,
         }
@@ -295,7 +294,9 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn input(&mut self, content: char) {
-        let template = self.attribute_template.set_content(content);
+        let template = self
+            .attribute_template
+            .set_content(self.charsets[self.active_charset as usize].map(content));
         let width = if template.wide { 2 } else { 1 };
 
         if self.cursor.column + width > self.buffer.width() {
@@ -602,15 +603,9 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn terminal_attribute(&mut self, attr: Attr) {
-        let handle_color = |color: AnsiColor| match color {
-            AnsiColor::Named(color) => Color::Indexed(color as u16),
-            AnsiColor::Spec(color) => Color::Rgb((color.r, color.g, color.b)),
-            AnsiColor::Indexed(index) => Color::Indexed(index as u16),
-        };
-
         match attr {
-            Attr::Foreground(color) => self.attribute_template.foreground = handle_color(color),
-            Attr::Background(color) => self.attribute_template.background = handle_color(color),
+            Attr::Foreground(color) => self.attribute_template.foreground = color,
+            Attr::Background(color) => self.attribute_template.background = color,
             Attr::Reset => self.attribute_template = Cell::default(),
             Attr::Reverse => self.attribute_template.flags |= Flags::INVERSE,
             Attr::CancelReverse => self.attribute_template.flags.remove(Flags::INVERSE),
@@ -740,11 +735,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_active_charset(&mut self, index: CharsetIndex) {
-        log!("Unhandled set active charset: {:?}", index);
+        log!("Set active charset: {:?}", index);
     }
 
     fn configure_charset(&mut self, index: CharsetIndex, charset: StandardCharset) {
-        log!("Unhandled configure charset: {:?}, {:?}", index, charset);
+        log!("Configure charset: {:?}, {:?}", index, charset);
+        self.charsets[index as usize] = charset;
     }
 
     fn set_color(&mut self, index: usize, color: Rgb) {

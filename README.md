@@ -146,7 +146,7 @@ let palette = Palette {
 terminal.set_custom_color_scheme(palette);
 ```
 
-Note that this setting is temporary and you will need to re-execute `set_custom_color_scheme` if you switch to another theme.
+Note that your setting is temporary because your palette will be overwritten if you switch to another theme.
 
 ### Miscellaneous
 
@@ -171,7 +171,7 @@ With `handle_keyboard`, some shortcuts are supported:
 
 ## Acknowledgement
 
-- [embedded-term](https://github.com/rcore-os/embedded-term): This project is a fork of it with some simplifications and improvements.
+- [embedded-term](https://github.com/rcore-os/embedded-term): This project is a fork of it with new features and improvements.
 - [alacritty](https://github.com/alacritty): General reference for the terminal implementation and `vte` crate.
 - [noto-sans-mono-bitmap-rs](https://github.com/phip1611/noto-sans-mono-bitmap-rs): Pre-rasterized smooth characters.
 

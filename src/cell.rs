@@ -1,5 +1,5 @@
-use crate::{color::Color, config::CONFIG};
 use unicode_width::UnicodeWidthChar;
+use vte::ansi::{Color, NamedColor};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,32 +44,17 @@ impl Cell {
             ..Default::default()
         }
     }
-
-    pub fn reset_color(&mut self) -> Self {
-        let color_scheme = CONFIG.color_scheme.lock();
-
-        if let Color::Rgb(_) = self.foreground {
-            self.foreground = Color::Rgb(color_scheme.foreground);
-        }
-        if let Color::Rgb(_) = self.background {
-            self.background = Color::Rgb(color_scheme.background);
-        }
-
-        *self
-    }
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        let color_scheme = CONFIG.color_scheme.lock();
-
         Self {
             content: ' ',
             wide: false,
             placeholder: false,
             flags: Flags::empty(),
-            foreground: Color::Rgb(color_scheme.foreground),
-            background: Color::Rgb(color_scheme.background),
+            foreground: Color::Named(NamedColor::Foreground),
+            background: Color::Named(NamedColor::Background),
         }
     }
 }

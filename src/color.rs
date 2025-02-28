@@ -1,47 +1,29 @@
-use crate::config::CONFIG;
-use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE};
+use vte::ansi::Color;
 
-#[repr(u8)]
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum NamedColor {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Magenta,
-    Cyan,
-    White,
-    BrightBlack,
-    BrightRed,
-    BrightGreen,
-    BrightYellow,
-    BrightBlue,
-    BrightMagenta,
-    BrightCyan,
-    BrightWhite,
-}
+use crate::config::CONFIG;
+use crate::palette::{DEFAULT_PALETTE_INDEX, PALETTE, Palette};
 
 pub type Rgb = (u8, u8, u8);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Color {
-    Indexed(u16),
-    Rgb(Rgb),
+pub trait ToRgb {
+    fn to_rgb(self) -> Rgb;
 }
 
-impl Color {
-    pub fn to_rgb(self) -> Rgb {
+impl ToRgb for Color {
+    fn to_rgb(self) -> Rgb {
         match self {
-            Self::Rgb(rgb) => rgb,
-            Self::Indexed(index) => {
+            Self::Spec(rgb) => (rgb.r, rgb.g, rgb.b),
+            Self::Named(color) => {
                 let color_scheme = CONFIG.color_scheme.lock();
-                match index {
+                match color as usize {
                     256 => color_scheme.foreground,
                     257 => color_scheme.background,
-                    index => color_scheme.ansi_colors[index as usize],
+                    index => color_scheme.ansi_colors[index],
                 }
+            }
+            Self::Indexed(index) => {
+                let color_scheme = CONFIG.color_scheme.lock();
+                color_scheme.ansi_colors[index as usize]
             }
         }
     }

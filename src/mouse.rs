@@ -25,9 +25,7 @@ pub struct MouseManager {
 
 impl Default for MouseManager {
     fn default() -> Self {
-        Self {
-            scroll_speed: 1,
-        }
+        Self { scroll_speed: 1 }
     }
 }
 

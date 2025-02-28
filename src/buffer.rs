@@ -5,6 +5,7 @@ use core::ops::Range;
 use derive_more::{Deref, DerefMut};
 
 use crate::cell::Cell;
+use crate::color::ToRgb;
 use crate::graphic::{DrawTarget, Graphic};
 
 const INIT_SIZE: (usize, usize) = (1, 1);
@@ -144,18 +145,6 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn full_flush(&mut self) {
-        for buffer in &mut [
-            &mut self.buffer,
-            &mut self.alt_buffer,
-            &mut self.above_buffer.data,
-            &mut self.below_buffer.data,
-        ] {
-            buffer
-                .iter_mut()
-                .flat_map(|row| row.iter_mut())
-                .for_each(|c| *c = c.reset_color());
-        }
-
         for (i, row) in self.buffer.iter().enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 self.graphic.write(i, j, cell);

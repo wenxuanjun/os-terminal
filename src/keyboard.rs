@@ -1,6 +1,6 @@
 use alloc::string::{String, ToString};
-use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::KeyCode::{self, *};
+use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::{DecodedKey, Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
 

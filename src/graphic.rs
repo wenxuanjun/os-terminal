@@ -3,7 +3,7 @@ use core::mem::swap;
 use derive_more::{Deref, DerefMut};
 
 use crate::cell::{Cell, Flags};
-use crate::color::Rgb;
+use crate::color::{Rgb, ToRgb};
 use crate::config::CONFIG;
 use crate::font::{ContentInfo, Rasterized};
 
@@ -37,7 +37,9 @@ impl<D: DrawTarget> Graphic<D> {
             }
         }
     }
+}
 
+impl<D: DrawTarget> Graphic<D> {
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
         if cell.placeholder {
             return;
@@ -74,7 +76,7 @@ impl<D: DrawTarget> Graphic<D> {
                 ($raster:ident) => {
                     for (y, lines) in $raster.iter().enumerate() {
                         for (x, &intensity) in lines.iter().enumerate() {
-                            let (r, g, b) = color_cache.colors[intensity as usize];
+                            let (r, g, b) = color_cache[intensity as usize];
                             self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
                         }
                     }
@@ -88,7 +90,7 @@ impl<D: DrawTarget> Graphic<D> {
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
-                let (r, g, b) = color_cache.colors[0xff];
+                let (r, g, b) = color_cache[0xff];
                 (0..font_height)
                     .for_each(|y| self.graphic.draw_pixel(x_start, y_start + y, (r, g, b)));
             }
@@ -97,7 +99,7 @@ impl<D: DrawTarget> Graphic<D> {
                 .flags
                 .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
             {
-                let (r, g, b) = color_cache.colors[0xff];
+                let (r, g, b) = color_cache[0xff];
                 let y_base = y_start + font_height - 1;
                 (0..font_width)
                     .for_each(|x| self.graphic.draw_pixel(x_start + x, y_base, (r, g, b)));
@@ -106,17 +108,16 @@ impl<D: DrawTarget> Graphic<D> {
     }
 }
 
-struct ColorCache {
-    colors: [Rgb; 256],
-}
+#[derive(Deref)]
+struct ColorCache([Rgb; 256]);
 
 impl ColorCache {
     fn new(foreground: Rgb, background: Rgb) -> Self {
-        let [r_diff, g_diff, b_diff] = [
+        let (r_diff, g_diff, b_diff) = (
             foreground.0 as i32 - background.0 as i32,
             foreground.1 as i32 - background.1 as i32,
             foreground.2 as i32 - background.2 as i32,
-        ];
+        );
 
         let colors = core::array::from_fn(|intensity| {
             let weight = intensity as i32;
@@ -127,6 +128,6 @@ impl ColorCache {
             )
         });
 
-        Self { colors }
+        Self(colors)
     }
 }

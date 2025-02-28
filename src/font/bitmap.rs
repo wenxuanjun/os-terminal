@@ -1,5 +1,5 @@
-use noto_sans_mono_bitmap::{get_raster, get_raster_width};
 use noto_sans_mono_bitmap::{FontWeight, RasterHeight};
+use noto_sans_mono_bitmap::{get_raster, get_raster_width};
 
 use super::{ContentInfo, FontManager, Rasterized};
 
