@@ -20,6 +20,7 @@ mod terminal;
 pub mod font;
 
 pub use color::Rgb;
+pub use config::ClipboardHandler;
 pub use graphic::DrawTarget;
 pub use keyboard::KeyboardManager;
 pub use mouse::{MouseButton, MouseInput};

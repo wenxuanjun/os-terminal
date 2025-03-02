@@ -5,8 +5,9 @@ use core::ops::Range;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
-use pc_keyboard::KeyCode;
 
+use base64::prelude::*;
+use pc_keyboard::{DecodedKey, KeyCode};
 use vte::ansi::{Attr, NamedMode, Rgb};
 use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
 use vte::ansi::{ClearMode, CursorShape, Processor, Timeout};
@@ -16,7 +17,7 @@ use vte::ansi::{Handler, LineClearMode, Mode, NamedPrivateMode, PrivateMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
 use crate::color::ColorScheme;
-use crate::config::CONFIG;
+use crate::config::{CONFIG, Clipboard, PtyWriter};
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
@@ -127,6 +128,9 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
+        if !self.inner.buffer.is_latest() {
+            self.inner.buffer.goto_latest();
+        }
         self.performer.advance(&mut self.inner, bstr);
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
@@ -138,44 +142,43 @@ impl<D: DrawTarget> Terminal<D> {
 }
 
 impl<D: DrawTarget> Terminal<D> {
-    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<String> {
-        let event = self.inner.keyboard.handle_keyboard(scancode);
-
-        if let KeyboardEvent::AnsiString(s) = event {
-            if !self.inner.buffer.is_latest() {
-                self.inner.buffer.goto_latest();
+    pub fn handle_keyboard(&mut self, scancode: u8) {
+        match self.inner.keyboard.handle_keyboard(scancode) {
+            KeyboardEvent::SetColorScheme(index) => {
+                self.set_color_scheme(index);
             }
-            return Some(s);
-        }
-
-        match event {
-            KeyboardEvent::SetColorScheme(index) => self.set_color_scheme(index),
-            KeyboardEvent::ScrollUp => self.inner.scroll_history(-1),
-            KeyboardEvent::ScrollDown => self.inner.scroll_history(1),
-            KeyboardEvent::ScrollPageUp => self.inner.scroll_history(-(self.rows() as isize)),
-            KeyboardEvent::ScrollPageDown => self.inner.scroll_history(self.rows() as isize),
-            _ => {}
-        }
-        None
-    }
-
-    pub fn handle_mouse(&mut self, input: MouseInput) -> Option<String> {
-        match self.inner.mouse.handle_mouse(input) {
-            MouseEvent::Scroll(lines) => {
-                if self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
-                    let key = if lines > 0 {
-                        KeyCode::ArrowUp
-                    } else {
-                        KeyCode::ArrowDown
-                    };
-                    let mapper = |_| self.inner.keyboard.simulate_key(key);
-                    Some((0..lines.unsigned_abs()).flat_map(mapper).collect())
-                } else {
-                    self.inner.scroll_history(lines);
-                    None
+            KeyboardEvent::Scroll { up, page } => {
+                let lines = if page { self.rows() } else { 1 } as isize;
+                self.inner.scroll_history(if up { -lines } else { lines });
+            }
+            KeyboardEvent::AnsiString(s) => CONFIG.pty_write(s),
+            KeyboardEvent::Paste => {
+                if let Some(clipboard) = CONFIG.clipboard.lock().as_mut() {
+                    if let Some(text) = clipboard.get_text() {
+                        CONFIG.pty_write(text);
+                    }
                 }
             }
-            _ => None,
+            _ => {}
+        }
+    }
+
+    pub fn handle_mouse(&mut self, input: MouseInput) {
+        if let MouseEvent::Scroll(lines) = self.inner.mouse.handle_mouse(input) {
+            if self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+                let key = DecodedKey::RawKey(if lines > 0 {
+                    KeyCode::ArrowUp
+                } else {
+                    KeyCode::ArrowDown
+                });
+
+                let e = self.inner.keyboard.key_to_event(key);
+                if let KeyboardEvent::AnsiString(s) = e {
+                    (0..lines.unsigned_abs()).for_each(|_| CONFIG.pty_write(s.clone()));
+                }
+            } else {
+                self.inner.scroll_history(lines);
+            }
         }
     }
 }
@@ -185,12 +188,20 @@ impl<D: DrawTarget> Terminal<D> {
         CONFIG.auto_flush.store(auto_flush, Ordering::Relaxed);
     }
 
-    pub fn set_logger(&mut self, logger: Option<fn(fmt::Arguments)>) {
-        *CONFIG.logger.lock() = logger;
+    pub fn set_logger(&mut self, logger: fn(fmt::Arguments)) {
+        *CONFIG.logger.lock() = Some(logger);
     }
 
-    pub fn set_bell_handler(&mut self, handler: Option<fn()>) {
-        *CONFIG.bell_handler.lock() = handler;
+    pub fn set_bell_handler(&mut self, handler: fn()) {
+        *CONFIG.bell_handler.lock() = Some(handler);
+    }
+
+    pub fn set_clipboard(&mut self, clipboard: Clipboard) {
+        *CONFIG.clipboard.lock() = Some(clipboard);
+    }
+
+    pub fn set_pty_writer(&mut self, writer: PtyWriter) {
+        *CONFIG.pty_writer.lock() = Some(writer);
     }
 
     pub fn set_history_size(&mut self, size: usize) {
@@ -294,11 +305,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn input(&mut self, content: char) {
+        let index = self.active_charset as usize;
         let template = self
             .attribute_template
-            .set_content(self.charsets[self.active_charset as usize].map(content));
-        let width = if template.wide { 2 } else { 1 };
+            .set_content(self.charsets[index].map(content));
 
+        let width = if template.wide { 2 } else { 1 };
         if self.cursor.column + width > self.buffer.width() {
             if !self.mode.contains(TerminalMode::LINE_WRAP) {
                 return;
@@ -364,11 +376,37 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn identify_terminal(&mut self, intermediate: Option<char>) {
-        log!("Unhandled identify terminal: {:?}", intermediate);
+        log!("Identify terminal: {:?}", intermediate);
+
+        let version_number = |version: &str| -> usize {
+            let mut result = 0;
+            let semver_versions = version.split('.');
+            for (i, part) in semver_versions.rev().enumerate() {
+                let semver_number = part.parse::<usize>().unwrap_or(0);
+                result += usize::pow(100, i as u32) * semver_number;
+            }
+            result
+        };
+
+        match intermediate {
+            None => CONFIG.pty_write(String::from("\x1b[?6c")),
+            Some('>') => {
+                let version = version_number(env!("CARGO_PKG_VERSION"));
+                CONFIG.pty_write(format!("\x1b[>0;{version};1c"));
+            }
+            _ => log!("Unsupported device attributes intermediate"),
+        }
     }
 
-    fn device_status(&mut self, status: usize) {
-        log!("Unhandled device_status: {}", status);
+    fn device_status(&mut self, arg: usize) {
+        match arg {
+            5 => CONFIG.pty_write(String::from("\x1b[0n")),
+            6 => {
+                let (row, column) = (self.cursor.row, self.cursor.column);
+                CONFIG.pty_write(format!("\x1b[{};{}R", row + 1, column + 1));
+            }
+            _ => log!("Unknown device status query: {}", arg),
+        };
     }
 
     fn move_forward(&mut self, cols: usize) {
@@ -437,7 +475,6 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn newline(&mut self) {
-        log!("Newline!");
         self.linefeed();
 
         if self.mode.contains(TerminalMode::LINE_FEED_NEW_LINE) {
@@ -543,7 +580,15 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn clear_screen(&mut self, mode: ClearMode) {
         log!("Clear screen: {:?}", mode);
         let template = self.attribute_template.clear();
+        
         match mode {
+            ClearMode::All | ClearMode::Saved => {
+                self.buffer.clear(template);
+                self.cursor = Cursor::default();
+                if matches!(mode, ClearMode::Saved) {
+                    self.buffer.clear_history();
+                }
+            }
             ClearMode::Above => {
                 for row in 0..self.cursor.row {
                     for column in 0..self.buffer.width() {
@@ -563,15 +608,6 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                         self.buffer.write(row, column, template);
                     }
                 }
-            }
-            ClearMode::All => {
-                self.buffer.clear(template);
-                self.cursor = Cursor::default();
-            }
-            ClearMode::Saved => {
-                self.buffer.clear(template);
-                self.cursor = Cursor::default();
-                self.buffer.clear_history();
             }
         }
     }
@@ -736,6 +772,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn set_active_charset(&mut self, index: CharsetIndex) {
         log!("Set active charset: {:?}", index);
+        self.active_charset = index;
     }
 
     fn configure_charset(&mut self, index: CharsetIndex, charset: StandardCharset) {
@@ -761,11 +798,31 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clipboard_store(&mut self, clipboard: u8, base64: &[u8]) {
-        log!("Unhandled clipboard store: {}, {:?}", clipboard, base64);
+        log!("Clipboard store: {}, {:?}", clipboard, base64);
+
+        if let Ok(bytes) = BASE64_STANDARD.decode(base64) {
+            let Ok(text) = String::from_utf8(bytes) else {
+                return;
+            };
+
+            if let Some(handler) = CONFIG.clipboard.lock().as_mut() {
+                handler.set_text(text);
+            }
+        }
     }
 
     fn clipboard_load(&mut self, clipboard: u8, terminator: &str) {
-        log!("Unhandled clipboard load: {}, {}", clipboard, terminator);
+        log!("Clipboard load: {}, {}", clipboard, terminator);
+
+        if let Some(handler) = CONFIG.clipboard.lock().as_mut() {
+            let Some(text) = handler.get_text() else {
+                return;
+            };
+
+            let base64 = BASE64_STANDARD.encode(text);
+            let result = format!("\x1b]52;{};{base64}{terminator}", clipboard as char);
+            CONFIG.pty_write(result);
+        };
     }
 
     fn decaln(&mut self) {
@@ -793,7 +850,9 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn report_keyboard_mode(&mut self) {
-        log!("Unhandled report keyboard mode!");
+        log!("Report keyboard mode!");
+        let current_mode = KeyboardModes::NO_MODE.bits();
+        CONFIG.pty_write(format!("\x1b[?{current_mode}u"));
     }
 
     fn push_keyboard_mode(&mut self, mode: KeyboardModes) {

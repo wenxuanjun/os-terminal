@@ -7,11 +7,10 @@ use pc_keyboard::{HandleControl, ScancodeSet1};
 #[derive(Debug)]
 pub enum KeyboardEvent {
     AnsiString(String),
+    Copy,
+    Paste,
     SetColorScheme(usize),
-    ScrollUp,
-    ScrollDown,
-    ScrollPageUp,
-    ScrollPageDown,
+    Scroll { up: bool, page: bool },
     None,
 }
 
@@ -38,13 +37,6 @@ impl KeyboardManager {
         self.app_cursor_mode = mode;
     }
 
-    pub fn simulate_key(&mut self, key: KeyCode) -> Option<String> {
-        match self.key_to_event(DecodedKey::RawKey(key)) {
-            KeyboardEvent::AnsiString(s) => Some(s),
-            _ => None,
-        }
-    }
-
     pub fn handle_keyboard(&mut self, scancode: u8) -> KeyboardEvent {
         self.keyboard
             .add_byte(scancode)
@@ -56,55 +48,67 @@ impl KeyboardManager {
 }
 
 impl KeyboardManager {
-    fn key_to_event(&self, key: DecodedKey) -> KeyboardEvent {
+    pub fn key_to_event(&self, key: DecodedKey) -> KeyboardEvent {
         let modifiers = self.keyboard.get_modifiers();
 
-        match key {
-            DecodedKey::RawKey(key) => {
-                if modifiers.is_ctrl() && modifiers.is_shifted() {
-                    if let Some(event) = self
-                        .handle_scroll(key)
-                        .or_else(|| self.handle_color_scheme(key))
-                    {
-                        return event;
-                    }
-                }
+        if modifiers.is_ctrl() && modifiers.is_shifted() {
+            let raw_key = match key {
+                DecodedKey::RawKey(k) => Some(k),
+                DecodedKey::Unicode(c) => match c {
+                    '\x03' => Some(C),
+                    '\x16' => Some(V),
+                    _ => None,
+                },
+            };
 
-                self.generate_ansi_sequence(key)
-                    .map(|s| KeyboardEvent::AnsiString(s.to_string()))
-                    .unwrap_or(KeyboardEvent::None)
+            if let Some(k) = raw_key {
+                if let Some(event) = self.handle_function(k) {
+                    return event;
+                }
             }
+        }
+
+        match key {
+            DecodedKey::RawKey(k) => self
+                .generate_ansi_sequence(k)
+                .map(|s| KeyboardEvent::AnsiString(s.to_string()))
+                .unwrap_or(KeyboardEvent::None),
             DecodedKey::Unicode(c) => KeyboardEvent::AnsiString(c.to_string()),
         }
     }
 
-    fn handle_color_scheme(&self, key: KeyCode) -> Option<KeyboardEvent> {
-        let index = match key {
-            F1 => 0,
-            F2 => 1,
-            F3 => 2,
-            F4 => 3,
-            F5 => 4,
-            F6 => 5,
-            F7 => 6,
-            F8 => 7,
-            _ => return None,
-        };
-        Some(KeyboardEvent::SetColorScheme(index))
-    }
+    fn handle_function(&self, key: KeyCode) -> Option<KeyboardEvent> {
+        if let Some(index) = match key {
+            F1 => Some(0),
+            F2 => Some(1),
+            F3 => Some(2),
+            F4 => Some(3),
+            F5 => Some(4),
+            F6 => Some(5),
+            F7 => Some(6),
+            KeyCode::F8 => Some(7),
+            _ => None,
+        } {
+            return Some(KeyboardEvent::SetColorScheme(index));
+        }
 
-    fn handle_scroll(&self, key: KeyCode) -> Option<KeyboardEvent> {
         match key {
-            ArrowUp => Some(KeyboardEvent::ScrollUp),
-            ArrowDown => Some(KeyboardEvent::ScrollDown),
-            PageUp => Some(KeyboardEvent::ScrollPageUp),
-            PageDown => Some(KeyboardEvent::ScrollPageDown),
+            C => Some(KeyboardEvent::Copy),
+            V => Some(KeyboardEvent::Paste),
+            ArrowUp | PageUp => Some(KeyboardEvent::Scroll {
+                up: true,
+                page: matches!(key, PageUp),
+            }),
+            ArrowDown | PageDown => Some(KeyboardEvent::Scroll {
+                up: false,
+                page: matches!(key, PageDown),
+            }),
             _ => None,
         }
     }
 
     #[rustfmt::skip]
-    fn generate_ansi_sequence(&self, key: KeyCode) -> Option<&'static str>{
+    fn generate_ansi_sequence(&self, key: KeyCode) -> Option<&'static str> {
         let sequence = match key {
             F1 => "\x1bOP",
             F2 => "\x1bOQ",

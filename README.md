@@ -60,22 +60,20 @@ terminal.process(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
 ```
 
+The keyboard, mouse, and some ansi sequences (such as report device status ) generate new ansi sequences. So if you use the above features, you should use `terminal.set_pty_writer(writer)` to set the writer first.
+
 ### Keyboard
 
-Now you can redirect the keyboard events to the terminal in scancode format (currently only Scan Code Set1 and North American standard English keyboard layout are supported) to let the terminal process shortcuts or get escaped strings so you can pass it to your shell.
+Now you can redirect the keyboard events to the terminal in scancode format (currently only Scan Code Set1 and North American standard English keyboard layout are supported) to let the terminal process shortcuts or pass escaped strings to your `PtyWriter`.
 
 ```rust
 // LCtrl pressed, C pressed, C released, LCtrl released
 let scancodes = [0x1d, 0x2e, 0xae, 0x9d];
 
 for scancode in scancodes.iter() {
-    if let Some(ansi_string) = terminal.handle_keyboard(*scancode) {
-        // Pass the ansi_string to your shell (None Some("\u{3}") None None)
-    }
+    terminal.handle_keyboard(*scancode);
 }
 ```
-
-And then you can advance the terminal state with the escaped string from the output of your shell.
 
 ### Mouse
 

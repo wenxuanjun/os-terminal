@@ -16,7 +16,7 @@ use nix::libc::{TIOCSWINSZ, ioctl};
 use nix::pty::{OpenptyResult, Winsize, openpty};
 use nix::unistd::{ForkResult, close, dup2, execvp, fork, read, setsid, write};
 use os_terminal::font::TrueTypeFont;
-use os_terminal::{DrawTarget, MouseInput, Rgb, Terminal};
+use os_terminal::{ClipboardHandler, DrawTarget, MouseInput, Rgb, Terminal};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
@@ -29,20 +29,54 @@ use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
 const TOUCHPAD_SCROLL_MULTIPLIER: f32 = 0.25;
 
+struct Clipboard(arboard::Clipboard);
+
+impl Clipboard {
+    fn new() -> Self {
+        Self(arboard::Clipboard::new().unwrap())
+    }
+}
+
+impl ClipboardHandler for Clipboard {
+    fn get_text(&mut self) -> Option<String> {
+        self.0.get_text().ok()
+    }
+
+    fn set_text(&mut self, text: String) {
+        self.0.set_text(text).unwrap();
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let OpenptyResult { master, slave } = openpty(None, None)?;
 
     match unsafe { fork() } {
+        Ok(ForkResult::Child) => {
+            close(master.into_raw_fd())?;
+
+            setsid()?;
+            dup2(slave.as_raw_fd(), 0)?;
+            dup2(slave.as_raw_fd(), 1)?;
+            dup2(slave.as_raw_fd(), 2)?;
+
+            let shell = env::var("SHELL").unwrap_or("bash".into());
+            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
+        }
         Ok(ForkResult::Parent { .. }) => {
             close(slave.into_raw_fd())?;
 
             let display = Display::default();
             let buffer = display.buffer.clone();
+            let (ansi_sender, ansi_receiver) = channel();
 
             let mut terminal = Terminal::new(display);
             terminal.set_auto_flush(false);
             terminal.set_scroll_speed(5);
-            terminal.set_logger(Some(|args| println!("Terminal: {:?}", args)));
+            terminal.set_logger(|args| println!("Terminal: {:?}", args));
+            terminal.set_clipboard(Box::new(Clipboard::new()));
+
+            let writer = ansi_sender.clone();
+            terminal.set_pty_writer(Box::new(move |data| writer.send(data).unwrap()));
 
             let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
             terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
@@ -62,7 +96,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             let event_loop = EventLoop::new()?;
-            let (ansi_sender, ansi_receiver) = channel();
             let terminal = Arc::new(Mutex::new(terminal));
             let pending_draw = Arc::new(AtomicBool::new(false));
 
@@ -101,17 +134,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
             event_loop.run_app(&mut app)?;
-        }
-        Ok(ForkResult::Child) => {
-            close(master.into_raw_fd())?;
-
-            setsid()?;
-            dup2(slave.as_raw_fd(), 0)?;
-            dup2(slave.as_raw_fd(), 1)?;
-            dup2(slave.as_raw_fd(), 2)?;
-
-            let shell = env::var("SHELL").unwrap_or("bash".into());
-            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
         }
         Err(_) => eprintln!("Fork failed"),
     }
@@ -186,13 +208,14 @@ impl ApplicationHandler for App {
             return;
         }
 
-        self.terminal.lock().unwrap().flush();
-
         if let Some(surface) = self.surface.as_mut() {
             let mut surface_buffer = surface.buffer_mut().unwrap();
+
+            self.terminal.lock().unwrap().flush();
             for (index, value) in self.buffer.iter().enumerate() {
                 surface_buffer[index] = value.load(Ordering::Relaxed);
             }
+
             surface_buffer.present().unwrap();
         }
     }
@@ -254,14 +277,10 @@ impl ApplicationHandler for App {
                 if self.scroll_accumulator.abs() >= 1.0 {
                     let lines = self.scroll_accumulator as isize;
                     self.scroll_accumulator -= lines as f32;
-                    if let Some(ansi_string) = self
-                        .terminal
+                    self.terminal
                         .lock()
                         .unwrap()
-                        .handle_mouse(MouseInput::Scroll(lines))
-                    {
-                        self.ansi_sender.send(ansi_string).unwrap();
-                    }
+                        .handle_mouse(MouseInput::Scroll(lines));
                     self.pending_draw.store(true, Ordering::Relaxed);
                 }
             }
@@ -279,14 +298,10 @@ impl ApplicationHandler for App {
                             self.terminal.lock().unwrap().handle_keyboard(0xe0);
                             scancode -= 0xe000;
                         }
-                        if let Some(ansi_string) = self
-                            .terminal
+                        self.terminal
                             .lock()
                             .unwrap()
-                            .handle_keyboard(scancode as u8)
-                        {
-                            self.ansi_sender.send(ansi_string).unwrap();
-                        }
+                            .handle_keyboard(scancode as u8);
                         self.pending_draw.store(true, Ordering::Relaxed);
                     }
                 }
