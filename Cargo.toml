@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2024"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -32,10 +32,9 @@ version = "0.15.0"
 features = ["ansi"]
 default-features = false
 
-[dependencies.base64]
-version = "0.22.1"
+[dependencies.base64ct]
+version = "1.6.0"
 features = ["alloc"]
-default-features = false
 
 [dependencies.derive_more]
 version = "2.0.1"

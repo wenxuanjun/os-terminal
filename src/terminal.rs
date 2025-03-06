@@ -6,7 +6,7 @@ use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
 
-use base64::prelude::*;
+use base64ct::{Base64, Encoding};
 use pc_keyboard::{DecodedKey, KeyCode};
 use vte::ansi::{Attr, NamedMode, Rgb};
 use vte::ansi::{CharsetIndex, StandardCharset, TabulationClearMode};
@@ -128,9 +128,6 @@ impl<D: DrawTarget> Terminal<D> {
 
     pub fn process(&mut self, bstr: &[u8]) {
         self.inner.cursor_handler(false);
-        if !self.inner.buffer.is_latest() {
-            self.inner.buffer.goto_latest();
-        }
         self.performer.advance(&mut self.inner, bstr);
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
@@ -151,10 +148,19 @@ impl<D: DrawTarget> Terminal<D> {
                 let lines = if page { self.rows() } else { 1 } as isize;
                 self.inner.scroll_history(if up { -lines } else { lines });
             }
-            KeyboardEvent::AnsiString(s) => CONFIG.pty_write(s),
+            KeyboardEvent::AnsiString(s) => {
+                self.inner.buffer.ensure_latest();
+                CONFIG.pty_write(s)
+            }
             KeyboardEvent::Paste => {
                 if let Some(clipboard) = CONFIG.clipboard.lock().as_mut() {
-                    if let Some(text) = clipboard.get_text() {
+                    let Some(text) = clipboard.get_text() else {
+                        return;
+                    };
+
+                    if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
+                        CONFIG.pty_write(format!("\x1b[200~{text}\x1b[201~"));
+                    } else {
                         CONFIG.pty_write(text);
                     }
                 }
@@ -580,7 +586,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn clear_screen(&mut self, mode: ClearMode) {
         log!("Clear screen: {:?}", mode);
         let template = self.attribute_template.clear();
-        
+
         match mode {
             ClearMode::All | ClearMode::Saved => {
                 self.buffer.clear(template);
@@ -713,6 +719,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 self.keyboard.set_app_cursor(true);
             }
             NamedPrivateMode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
+            NamedPrivateMode::BracketedPaste => self.mode.insert(TerminalMode::BRACKETED_PASTE),
             _ => log!("Unhandled set mode: {:?}", mode),
         }
     }
@@ -738,6 +745,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 self.keyboard.set_app_cursor(false);
             }
             NamedPrivateMode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
+            NamedPrivateMode::BracketedPaste => self.mode.remove(TerminalMode::BRACKETED_PASTE),
             _ => log!("Unhandled unset mode: {:?}", mode),
         }
     }
@@ -800,11 +808,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn clipboard_store(&mut self, clipboard: u8, base64: &[u8]) {
         log!("Clipboard store: {}, {:?}", clipboard, base64);
 
-        if let Ok(bytes) = BASE64_STANDARD.decode(base64) {
-            let Ok(text) = String::from_utf8(bytes) else {
-                return;
-            };
+        let text = str::from_utf8(base64)
+            .ok()
+            .and_then(|b64| Base64::decode_vec(b64).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok());
 
+        if let Some(text) = text {
             if let Some(handler) = CONFIG.clipboard.lock().as_mut() {
                 handler.set_text(text);
             }
@@ -819,7 +828,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 return;
             };
 
-            let base64 = BASE64_STANDARD.encode(text);
+            let base64 = Base64::encode_string(text.as_bytes());
             let result = format!("\x1b]52;{};{base64}{terminator}", clipboard as char);
             CONFIG.pty_write(result);
         };

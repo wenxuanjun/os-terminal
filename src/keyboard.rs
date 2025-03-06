@@ -86,7 +86,7 @@ impl KeyboardManager {
             F5 => Some(4),
             F6 => Some(5),
             F7 => Some(6),
-            KeyCode::F8 => Some(7),
+            F8 => Some(7),
             _ => None,
         } {
             return Some(KeyboardEvent::SetColorScheme(index));

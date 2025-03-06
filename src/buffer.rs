@@ -2,7 +2,6 @@ use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use core::mem::swap;
 use core::ops::Range;
-use derive_more::{Deref, DerefMut};
 
 use crate::cell::Cell;
 use crate::color::ToRgb;
@@ -11,53 +10,17 @@ use crate::graphic::{DrawTarget, Graphic};
 const INIT_SIZE: (usize, usize) = (1, 1);
 const DEFAULT_HISTORY_SIZE: usize = 200;
 
-#[derive(Deref, DerefMut)]
-pub struct FixedStack<T> {
-    #[deref]
-    #[deref_mut]
-    data: VecDeque<T>,
-    capacity: usize,
-}
-
-impl<T> FixedStack<T> {
-    pub fn new(capacity: usize) -> Self {
-        let data = VecDeque::with_capacity(capacity);
-        Self { data, capacity }
-    }
-
-    pub fn push(&mut self, item: T) -> Option<T> {
-        let mut pop = None;
-        if self.data.len() == self.capacity {
-            pop = self.data.pop_front();
-        }
-        self.data.push_back(item);
-        pop
-    }
-
-    pub fn pop(&mut self) -> Option<T> {
-        self.data.pop_back()
-    }
-
-    pub fn resize(&mut self, capacity: usize) {
-        self.capacity = capacity;
-        if self.data.len() > capacity {
-            let split_at = self.data.len() - capacity;
-            self.data = self.data.split_off(split_at);
-        }
-        self.data.shrink_to(capacity);
-    }
-}
-
 pub struct TerminalBuffer<D: DrawTarget> {
     graphic: Graphic<D>,
     size: (usize, usize),
     pixel_size: (usize, usize),
     alt_screen_mode: bool,
     flush_cache: VecDeque<Vec<Cell>>,
+    start_row: usize,
+    alt_start_row: usize,
+    history_size: usize,
     buffer: VecDeque<Vec<Cell>>,
     alt_buffer: VecDeque<Vec<Cell>>,
-    above_buffer: FixedStack<Vec<Cell>>,
-    below_buffer: FixedStack<Vec<Cell>>,
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
@@ -82,14 +45,16 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             buffer: buffer.clone().into(),
             alt_buffer: buffer.clone().into(),
             flush_cache: buffer.into(),
-            above_buffer: FixedStack::new(DEFAULT_HISTORY_SIZE),
-            below_buffer: FixedStack::new(DEFAULT_HISTORY_SIZE),
+            start_row: 0,
+            alt_start_row: 0,
+            history_size: DEFAULT_HISTORY_SIZE,
         }
     }
 
     pub fn swap_alt_screen(&mut self, cell: Cell) {
         self.alt_screen_mode = !self.alt_screen_mode;
         swap(&mut self.buffer, &mut self.alt_buffer);
+        swap(&mut self.start_row, &mut self.alt_start_row);
 
         if self.alt_screen_mode {
             self.clear(cell);
@@ -117,24 +82,31 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn read(&self, row: usize, col: usize) -> Cell {
-        self.buffer[row][col]
+        self.buffer[self.start_row + row][col]
     }
 
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
-        self.buffer[row][col] = cell;
+        let start_row = self.buffer.len() - self.height();
+        self.buffer[start_row + row][col] = cell;
     }
 
     pub fn clear(&mut self, cell: Cell) {
+        let start = self.start_row;
+        let end = self.start_row + self.height();
+
         self.buffer
-            .iter_mut()
-            .flat_map(|row| row.iter_mut())
-            .for_each(|c| *c = cell);
+            .range_mut(start..end)
+            .for_each(|row| row.fill(cell));
     }
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
     pub fn flush(&mut self) {
-        for (i, row) in self.buffer.iter().enumerate() {
+        let start = self.start_row;
+        let end = self.start_row + self.height();
+        let buffer = self.buffer.range_mut(start..end);
+
+        for (i, row) in buffer.enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 if cell != self.flush_cache[i][j] {
                     self.graphic.write(i, j, cell);
@@ -145,7 +117,11 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 
     pub fn full_flush(&mut self) {
-        for (i, row) in self.buffer.iter().enumerate() {
+        let start = self.start_row;
+        let end = self.start_row + self.height();
+        let buffer = self.buffer.range_mut(start..end);
+
+        for (i, row) in buffer.enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 self.graphic.write(i, j, cell);
             }
@@ -167,89 +143,71 @@ impl<D: DrawTarget> TerminalBuffer<D> {
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn is_latest(&self) -> bool {
-        if self.alt_screen_mode {
-            true
-        } else {
-            self.below_buffer.is_empty()
-        }
-    }
-
-    pub fn goto_latest(&mut self) {
-        if !self.alt_screen_mode {
-            let len = self.below_buffer.len();
-            self.scroll_history(-(len as isize));
-        }
-    }
-
     pub fn clear_history(&mut self) {
         if !self.alt_screen_mode {
-            self.above_buffer.clear();
-            self.below_buffer.clear();
+            self.buffer.drain(0..self.start_row);
+            self.start_row = 0;
         }
     }
 
-    pub fn resize_history(&mut self, new_capacity: usize) {
-        self.above_buffer.resize(new_capacity);
-        self.below_buffer.resize(new_capacity);
+    pub fn scroll_history(&mut self, count: isize) {
+        self.start_row = self
+            .start_row
+            .saturating_add_signed(-count)
+            .min(self.buffer.len() - self.height());
+    }
+
+    pub fn resize_history(&mut self, capacity: usize) {
+        self.history_size = capacity;
+    }
+
+    pub fn ensure_latest(&mut self) {
+        self.start_row = self.buffer.len() - self.height();
     }
 }
 
 impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn scroll_history(&mut self, count: isize) {
-        if self.alt_screen_mode {
-            return;
-        }
-
-        let moves = if count > 0 {
-            count.unsigned_abs().min(self.above_buffer.len())
-        } else {
-            count.unsigned_abs().min(self.below_buffer.len())
-        };
-
-        if count > 0 {
-            for _ in 0..moves {
-                self.below_buffer.push(self.buffer.pop_back().unwrap());
-                self.buffer.push_front(self.above_buffer.pop().unwrap());
-            }
-        } else {
-            for _ in 0..moves {
-                self.above_buffer.push(self.buffer.pop_front().unwrap());
-                self.buffer.push_back(self.below_buffer.pop().unwrap());
-            }
-        }
-    }
-
     pub fn scroll_region(&mut self, count: isize, cell: Cell, region: Range<usize>) {
         let (top, bottom) = (region.start, region.end);
+        let start_row = self.buffer.len() - self.height();
 
         if count > 0 {
             for _ in 0..count.unsigned_abs() {
-                let row = self.buffer.remove(bottom).unwrap();
-                let mut temp = None;
                 if !self.alt_screen_mode && top == 0 {
-                    temp = self.below_buffer.push(row);
-                }
-                if let Some(mut temp) = temp {
-                    temp.fill(cell);
-                    self.buffer.insert(top, temp);
+                    let row = if self.history_size + self.height() == self.buffer.len() {
+                        let mut row = self.buffer.pop_back().unwrap();
+                        row.fill(cell);
+                        row
+                    } else {
+                        vec![cell; self.width()]
+                    };
+                    self.buffer.insert(start_row, row);
                 } else {
-                    self.buffer.insert(top, vec![cell; self.width()]);
+                    let mut row = self.buffer.remove(start_row + bottom).unwrap();
+                    row.fill(cell);
+                    self.buffer.insert(start_row + top, row);
                 }
             }
         } else {
             for _ in 0..count.unsigned_abs() {
-                let row = self.buffer.remove(top).unwrap();
-                let mut temp = None;
                 if !self.alt_screen_mode && bottom == self.height() - 1 {
-                    temp = self.above_buffer.push(row);
-                }
-                if let Some(mut temp) = temp {
-                    temp.fill(cell);
-                    self.buffer.insert(bottom, temp);
+                    if self.start_row + self.height() == self.buffer.len() {
+                        self.start_row += 1;
+                    }
+                    let row = if self.history_size + self.height() == self.buffer.len() {
+                        let mut row = self.buffer.pop_front().unwrap();
+                        row.fill(cell);
+                        self.start_row = self.start_row.saturating_sub(1);
+                        row
+                    } else {
+                        vec![cell; self.width()]
+                    };
+                    self.buffer.push_back(row);
                 } else {
-                    self.buffer.insert(bottom, vec![cell; self.width()])
-                };
+                    let mut row = self.buffer.remove(start_row + top).unwrap();
+                    row.fill(cell);
+                    self.buffer.insert(start_row + bottom, row);
+                }
             }
         }
     }
