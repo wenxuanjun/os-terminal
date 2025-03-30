@@ -33,7 +33,7 @@ features = ["ansi"]
 default-features = false
 
 [dependencies.base64ct]
-version = "1.6.0"
+version = "1.7.1"
 features = ["alloc"]
 
 [dependencies.derive_more]

@@ -218,8 +218,8 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.mouse.set_scroll_speed(speed);
     }
 
-    pub fn set_auto_crnl(&mut self, auto_crnl: bool) {
-        CONFIG.auto_crnl.store(auto_crnl, Ordering::Relaxed);
+    pub fn set_crnl_mapping(&mut self, mapping: bool) {
+        CONFIG.crnl_mapping.store(mapping, Ordering::Relaxed);
     }
 
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
@@ -460,7 +460,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn linefeed(&mut self) {
-        if CONFIG.auto_crnl.load(Ordering::Relaxed) {
+        if CONFIG.crnl_mapping.load(Ordering::Relaxed) {
             self.carriage_return();
         }
 
@@ -478,14 +478,6 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn substitute(&mut self) {
         log!("Unhandled substitute!");
-    }
-
-    fn newline(&mut self) {
-        self.linefeed();
-
-        if self.mode.contains(TerminalMode::LINE_FEED_NEW_LINE) {
-            self.carriage_return();
-        }
     }
 
     fn set_horizontal_tabstop(&mut self) {

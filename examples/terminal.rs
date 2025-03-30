@@ -210,12 +210,10 @@ impl ApplicationHandler for App {
 
         if let Some(surface) = self.surface.as_mut() {
             let mut surface_buffer = surface.buffer_mut().unwrap();
-
             self.terminal.lock().unwrap().flush();
             for (index, value) in self.buffer.iter().enumerate() {
                 surface_buffer[index] = value.load(Ordering::Relaxed);
             }
-
             surface_buffer.present().unwrap();
         }
     }

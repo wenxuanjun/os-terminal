@@ -19,7 +19,7 @@ pub type Clipboard = Box<dyn ClipboardHandler + Send>;
 
 pub struct TerminalConfig {
     pub auto_flush: AtomicBool,
-    pub auto_crnl: AtomicBool,
+    pub crnl_mapping: AtomicBool,
     pub logger: Mutex<Option<fn(fmt::Arguments)>>,
     pub clipboard: Mutex<Option<Clipboard>>,
     pub pty_writer: Mutex<Option<PtyWriter>>,
@@ -32,7 +32,7 @@ impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
             auto_flush: AtomicBool::new(true),
-            auto_crnl: AtomicBool::new(true),
+            crnl_mapping: AtomicBool::new(false),
             logger: Default::default(),
             clipboard: Default::default(),
             pty_writer: Default::default(),

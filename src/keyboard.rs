@@ -1,8 +1,11 @@
+use core::sync::atomic::Ordering;
 use alloc::string::{String, ToString};
 use pc_keyboard::KeyCode::{self, *};
 use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::{DecodedKey, Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
+
+use crate::config::CONFIG;
 
 #[derive(Debug)]
 pub enum KeyboardEvent {
@@ -64,6 +67,14 @@ impl KeyboardManager {
             if let Some(k) = raw_key {
                 if let Some(event) = self.handle_function(k) {
                     return event;
+                }
+            }
+        }
+
+        if !CONFIG.crnl_mapping.load(Ordering::Relaxed) {
+            if let DecodedKey::Unicode(c) = key {
+                if c == '\n' {
+                    return KeyboardEvent::AnsiString("\r".to_string());
                 }
             }
         }
