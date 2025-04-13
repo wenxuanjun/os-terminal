@@ -800,7 +800,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn clipboard_store(&mut self, clipboard: u8, base64: &[u8]) {
         log!("Clipboard store: {}, {:?}", clipboard, base64);
 
-        let text = str::from_utf8(base64)
+        let text = core::str::from_utf8(base64)
             .ok()
             .and_then(|b64| Base64::decode_vec(b64).ok())
             .and_then(|bytes| String::from_utf8(bytes).ok());
