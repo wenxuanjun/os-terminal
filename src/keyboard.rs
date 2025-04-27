@@ -1,7 +1,7 @@
-use core::sync::atomic::Ordering;
 use alloc::string::{String, ToString};
-use pc_keyboard::KeyCode::{self, *};
+use core::sync::atomic::Ordering;
 use pc_keyboard::layouts::Us104Key;
+use pc_keyboard::KeyCode::{self, *};
 use pc_keyboard::{DecodedKey, Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
 
@@ -57,11 +57,9 @@ impl KeyboardManager {
         if modifiers.is_ctrl() && modifiers.is_shifted() {
             let raw_key = match key {
                 DecodedKey::RawKey(k) => Some(k),
-                DecodedKey::Unicode(c) => match c {
-                    '\x03' => Some(C),
-                    '\x16' => Some(V),
-                    _ => None,
-                },
+                DecodedKey::Unicode('\x03') => Some(C),
+                DecodedKey::Unicode('\x16') => Some(V),
+                _ => None,
             };
 
             if let Some(k) = raw_key {
@@ -71,20 +69,19 @@ impl KeyboardManager {
             }
         }
 
-        if !CONFIG.crnl_mapping.load(Ordering::Relaxed) {
-            if let DecodedKey::Unicode(c) = key {
-                if c == '\n' {
-                    return KeyboardEvent::AnsiString("\r".to_string());
-                }
-            }
-        }
-
         match key {
             DecodedKey::RawKey(k) => self
                 .generate_ansi_sequence(k)
                 .map(|s| KeyboardEvent::AnsiString(s.to_string()))
                 .unwrap_or(KeyboardEvent::None),
-            DecodedKey::Unicode(c) => KeyboardEvent::AnsiString(c.to_string()),
+            DecodedKey::Unicode(c) => match c {
+                '\x08' => KeyboardEvent::AnsiString("\x7f".to_string()),
+                '\x7f' => KeyboardEvent::AnsiString("\x1b[3~".to_string()),
+                '\n' if !CONFIG.crnl_mapping.load(Ordering::Relaxed) => {
+                    KeyboardEvent::AnsiString("\r".to_string())
+                }
+                _ => KeyboardEvent::AnsiString(c.to_string()),
+            },
         }
     }
 

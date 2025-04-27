@@ -480,6 +480,14 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         log!("Unhandled substitute!");
     }
 
+    fn newline(&mut self) {
+        self.linefeed();
+
+        if self.mode.contains(TerminalMode::LINE_FEED_NEW_LINE) {
+            self.carriage_return();
+        }
+    }
+
     fn set_horizontal_tabstop(&mut self) {
         log!("Unhandled set horizontal tabstop!");
     }
