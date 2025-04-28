@@ -17,7 +17,7 @@ use vte::ansi::{Handler, LineClearMode, Mode, NamedPrivateMode, PrivateMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
 use crate::color::ColorScheme;
-use crate::config::{CONFIG, Clipboard, PtyWriter};
+use crate::config::{Clipboard, PtyWriter, CONFIG};
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};

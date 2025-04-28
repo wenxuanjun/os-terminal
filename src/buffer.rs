@@ -15,7 +15,7 @@ pub struct TerminalBuffer<D: DrawTarget> {
     size: (usize, usize),
     pixel_size: (usize, usize),
     alt_screen_mode: bool,
-    flush_cache: VecDeque<Vec<Cell>>,
+    flush_cache: Vec<Vec<Cell>>,
     start_row: usize,
     alt_start_row: usize,
     history_size: usize,
@@ -44,7 +44,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             alt_screen_mode: false,
             buffer: buffer.clone().into(),
             alt_buffer: buffer.clone().into(),
-            flush_cache: buffer.into(),
+            flush_cache: buffer,
             start_row: 0,
             alt_start_row: 0,
             history_size: DEFAULT_HISTORY_SIZE,
@@ -75,7 +75,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             self.size = (width, height);
             self.buffer.clone_from(&buffer);
             self.alt_buffer.clone_from(&buffer);
-            self.flush_cache = buffer;
+            self.flush_cache = buffer.into();
         }
     }
 }

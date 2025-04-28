@@ -5,16 +5,16 @@ use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, IntoRawFd};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process};
 
 use keycode::{KeyMap, KeyMapping};
 use nix::errno::Errno;
-use nix::libc::{TIOCSWINSZ, ioctl};
-use nix::pty::{OpenptyResult, Winsize, openpty};
-use nix::unistd::{ForkResult, close, dup2, execvp, fork, read, setsid, write};
+use nix::libc::{ioctl, TIOCSWINSZ};
+use nix::pty::{openpty, OpenptyResult, Winsize};
+use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
 use os_terminal::font::TrueTypeFont;
 use os_terminal::{ClipboardHandler, DrawTarget, MouseInput, Rgb, Terminal};
 

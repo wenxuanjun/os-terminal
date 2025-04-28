@@ -1,7 +1,7 @@
 use vte::ansi::Color;
 
 use crate::config::CONFIG;
-use crate::palette::{DEFAULT_PALETTE_INDEX, PALETTE, Palette};
+use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE};
 
 pub type Rgb = (u8, u8, u8);
 
