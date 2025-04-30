@@ -1,6 +1,6 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::mem::swap;
-use derive_more::{Deref, DerefMut};
+use core::ops::{Deref, DerefMut};
 
 use crate::cell::{Cell, Flags};
 use crate::color::{Rgb, ToRgb};
@@ -12,12 +12,23 @@ pub trait DrawTarget {
     fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb);
 }
 
-#[derive(Deref, DerefMut)]
 pub struct Graphic<D: DrawTarget> {
-    #[deref]
-    #[deref_mut]
     graphic: D,
     color_cache: BTreeMap<(Rgb, Rgb), ColorCache>,
+}
+
+impl<D: DrawTarget> Deref for Graphic<D> {
+    type Target = D;
+
+    fn deref(&self) -> &Self::Target {
+        &self.graphic
+    }
+}
+
+impl<D: DrawTarget> DerefMut for Graphic<D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.graphic
+    }
 }
 
 impl<D: DrawTarget> Graphic<D> {
@@ -76,7 +87,7 @@ impl<D: DrawTarget> Graphic<D> {
                 ($raster:ident) => {
                     for (y, lines) in $raster.iter().enumerate() {
                         for (x, &intensity) in lines.iter().enumerate() {
-                            let (r, g, b) = color_cache[intensity as usize];
+                            let (r, g, b) = color_cache.0[intensity as usize];
                             self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
                         }
                     }
@@ -90,7 +101,7 @@ impl<D: DrawTarget> Graphic<D> {
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
-                let (r, g, b) = color_cache[0xff];
+                let (r, g, b) = color_cache.0[0xff];
                 (0..font_height)
                     .for_each(|y| self.graphic.draw_pixel(x_start, y_start + y, (r, g, b)));
             }
@@ -99,7 +110,7 @@ impl<D: DrawTarget> Graphic<D> {
                 .flags
                 .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
             {
-                let (r, g, b) = color_cache[0xff];
+                let (r, g, b) = color_cache.0[0xff];
                 let y_base = y_start + font_height - 1;
                 (0..font_width)
                     .for_each(|x| self.graphic.draw_pixel(x_start + x, y_base, (r, g, b)));
@@ -108,7 +119,6 @@ impl<D: DrawTarget> Graphic<D> {
     }
 }
 
-#[derive(Deref)]
 struct ColorCache([Rgb; 256]);
 
 impl ColorCache {

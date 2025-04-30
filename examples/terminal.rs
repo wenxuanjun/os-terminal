@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use std::{env, process};
 
 use keycode::{KeyMap, KeyMapping};
-use nix::errno::Errno;
 use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
-use nix::unistd::{close, dup2, execvp, fork, read, setsid, write, ForkResult};
+use nix::unistd::{close, execvp, fork, read, write, ForkResult};
+use nix::unistd::{dup2_stderr, dup2_stdin, dup2_stdout, setsid};
 use os_terminal::font::TrueTypeFont;
 use os_terminal::{ClipboardHandler, DrawTarget, MouseInput, Rgb, Terminal};
 
@@ -55,9 +55,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             close(master.into_raw_fd())?;
 
             setsid()?;
-            dup2(slave.as_raw_fd(), 0)?;
-            dup2(slave.as_raw_fd(), 1)?;
-            dup2(slave.as_raw_fd(), 2)?;
+            dup2_stdin(slave.as_fd())?;
+            dup2_stdout(slave.as_fd())?;
+            dup2_stderr(slave.as_fd())?;
 
             let shell = env::var("SHELL").unwrap_or("bash".into());
             let _ = execvp::<CString>(&CString::new(shell)?, &[]);
@@ -75,25 +75,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             terminal.set_logger(|args| println!("Terminal: {:?}", args));
             terminal.set_clipboard(Box::new(Clipboard::new()));
 
-            let writer = ansi_sender.clone();
-            terminal.set_pty_writer(Box::new(move |data| writer.send(data).unwrap()));
+            terminal.set_pty_writer({
+                let ansi_sender = ansi_sender.clone();
+                Box::new(move |data| ansi_sender.send(data).unwrap())
+            });
 
             let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
             terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
             terminal.set_history_size(1000);
 
-            let win_size = {
-                Winsize {
-                    ws_row: terminal.rows() as u16,
-                    ws_col: terminal.columns() as u16,
-                    ws_xpixel: DISPLAY_SIZE.0 as u16,
-                    ws_ypixel: DISPLAY_SIZE.1 as u16,
-                }
+            let win_size = Winsize {
+                ws_row: terminal.rows() as u16,
+                ws_col: terminal.columns() as u16,
+                ws_xpixel: DISPLAY_SIZE.0 as u16,
+                ws_ypixel: DISPLAY_SIZE.1 as u16,
             };
 
-            unsafe {
-                ioctl(master.as_raw_fd(), TIOCSWINSZ, &win_size);
-            }
+            unsafe { ioctl(master.as_raw_fd(), TIOCSWINSZ, &win_size) };
 
             let event_loop = EventLoop::new()?;
             let terminal = Arc::new(Mutex::new(terminal));
@@ -106,22 +104,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pending_draw.clone(),
             );
 
-            std::thread::spawn({
-                let master = master.as_raw_fd();
-                move || {
-                    let mut temp = [0u8; 4096];
-                    loop {
-                        match read(master, &mut temp) {
-                            Ok(n) if n > 0 => {
-                                terminal.lock().unwrap().process(&temp[..n]);
-                                pending_draw.store(true, Ordering::Relaxed);
-                            }
-                            Ok(_) => break,
-                            Err(Errno::EIO) => process::exit(0),
-                            Err(e) => {
-                                eprintln!("Error reading from PTY: {:?}", e);
-                                process::exit(1)
-                            }
+            let master_clone = master.try_clone()?;
+            std::thread::spawn(move || {
+                let mut temp = [0u8; 4096];
+                loop {
+                    match read(master_clone.as_fd(), &mut temp) {
+                        Ok(n) if n > 0 => {
+                            terminal.lock().unwrap().process(&temp[..n]);
+                            pending_draw.store(true, Ordering::Relaxed);
+                        }
+                        Ok(_) => break,
+                        Err(e) => {
+                            eprintln!("Error reading from PTY: {:?}", e);
+                            process::exit(1)
                         }
                     }
                 }
@@ -203,18 +198,21 @@ impl App {
 }
 
 impl ApplicationHandler for App {
-    fn new_events(&mut self, _: &ActiveEventLoop, _: StartCause) {
-        if !self.pending_draw.swap(false, Ordering::Relaxed) {
+    fn new_events(&mut self, _: &ActiveEventLoop, cause: StartCause) {
+        if !matches!(cause, StartCause::ResumeTimeReached { .. })
+            || !self.pending_draw.swap(false, Ordering::Relaxed)
+        {
             return;
         }
-
         if let Some(surface) = self.surface.as_mut() {
-            let mut surface_buffer = surface.buffer_mut().unwrap();
             self.terminal.lock().unwrap().flush();
+
+            let mut buffer = surface.buffer_mut().unwrap();
             for (index, value) in self.buffer.iter().enumerate() {
-                surface_buffer[index] = value.load(Ordering::Relaxed);
+                buffer[index] = value.load(Ordering::Relaxed);
             }
-            surface_buffer.present().unwrap();
+
+            buffer.present().unwrap();
         }
     }
 
@@ -223,10 +221,10 @@ impl ApplicationHandler for App {
             .primary_monitor()
             .and_then(|m| m.refresh_rate_millihertz())
             .unwrap_or(60000);
-        let frame_duration = 1000.0 / (refresh_rate as f32 / 1000.0);
 
+        let frame_duration = 1000.0 / (refresh_rate as f32 / 1000.0);
         let duration = Duration::from_millis(frame_duration as u64);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + duration))
+        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + duration));
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -259,12 +257,9 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
             }
-            WindowEvent::Ime(ime) => match ime {
-                Ime::Commit(text) => {
-                    self.ansi_sender.send(text).unwrap();
-                }
-                _ => {}
-            },
+            WindowEvent::Ime(Ime::Commit(text)) => {
+                self.ansi_sender.send(text).unwrap();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.scroll_accumulator += match delta {
                     MouseScrollDelta::LineDelta(_, lines) => lines,
