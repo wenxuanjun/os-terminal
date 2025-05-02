@@ -340,8 +340,8 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn goto(&mut self, row: i32, col: usize) {
-        self.cursor.row = min(row as usize, self.buffer.height());
-        self.cursor.column = min(col, self.buffer.width());
+        self.cursor.row = min(row as usize, self.buffer.height() - 1);
+        self.cursor.column = min(col, self.buffer.width() - 1);
     }
 
     fn goto_line(&mut self, row: i32) {
