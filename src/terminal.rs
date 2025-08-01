@@ -86,6 +86,7 @@ pub struct TerminalInner<D: DrawTarget> {
     buffer: TerminalBuffer<D>,
     keyboard: KeyboardManager,
     mouse: MouseManager,
+    pty_writer: Option<PtyWriter>,
     scroll_region: Range<usize>,
     charsets: [StandardCharset; 4],
     active_charset: CharsetIndex,
@@ -107,6 +108,7 @@ impl<D: DrawTarget> Terminal<D> {
                 buffer: TerminalBuffer::new(graphic),
                 keyboard: KeyboardManager::default(),
                 mouse: MouseManager::default(),
+                pty_writer: Default::default(),
                 scroll_region: Default::default(),
                 charsets: Default::default(),
                 active_charset: Default::default(),
@@ -150,7 +152,7 @@ impl<D: DrawTarget> Terminal<D> {
             }
             KeyboardEvent::AnsiString(s) => {
                 self.inner.buffer.ensure_latest();
-                CONFIG.pty_write(s)
+                self.inner.pty_write(s);
             }
             KeyboardEvent::Paste => {
                 if let Some(clipboard) = CONFIG.clipboard.lock().as_mut() {
@@ -159,9 +161,9 @@ impl<D: DrawTarget> Terminal<D> {
                     };
 
                     if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
-                        CONFIG.pty_write(format!("\x1b[200~{text}\x1b[201~"));
+                        self.inner.pty_write(format!("\x1b[200~{text}\x1b[201~"));
                     } else {
-                        CONFIG.pty_write(text);
+                        self.inner.pty_write(text);
                     }
                 }
             }
@@ -180,7 +182,9 @@ impl<D: DrawTarget> Terminal<D> {
 
                 let e = self.inner.keyboard.key_to_event(key);
                 if let KeyboardEvent::AnsiString(s) = e {
-                    (0..lines.unsigned_abs()).for_each(|_| CONFIG.pty_write(s.clone()));
+                    for _ in 0..lines.unsigned_abs() {
+                        self.inner.pty_write(s.clone());
+                    }
                 }
             } else {
                 self.inner.scroll_history(lines);
@@ -207,7 +211,7 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn set_pty_writer(&mut self, writer: PtyWriter) {
-        *CONFIG.pty_writer.lock() = Some(writer);
+        self.inner.pty_writer = Some(writer);
     }
 
     pub fn set_history_size(&mut self, size: usize) {
@@ -272,6 +276,12 @@ impl<D: DrawTarget> TerminalInner<D> {
         }
 
         self.buffer.write(row, column, origin_cell);
+    }
+
+    fn pty_write(&self, data: String) {
+        if let Some(writer) = self.pty_writer.as_ref() {
+            writer(data);
+        }
     }
 
     fn scroll_history(&mut self, count: isize) {
@@ -395,10 +405,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         };
 
         match intermediate {
-            None => CONFIG.pty_write(String::from("\x1b[?6c")),
+            None => self.pty_write(String::from("\x1b[?6c")),
             Some('>') => {
                 let version = version_number(env!("CARGO_PKG_VERSION"));
-                CONFIG.pty_write(format!("\x1b[>0;{version};1c"));
+                self.pty_write(format!("\x1b[>0;{version};1c"));
             }
             _ => log!("Unsupported device attributes intermediate"),
         }
@@ -406,10 +416,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn device_status(&mut self, arg: usize) {
         match arg {
-            5 => CONFIG.pty_write(String::from("\x1b[0n")),
+            5 => self.pty_write(String::from("\x1b[0n")),
             6 => {
                 let (row, column) = (self.cursor.row, self.cursor.column);
-                CONFIG.pty_write(format!("\x1b[{};{}R", row + 1, column + 1));
+                self.pty_write(format!("\x1b[{};{}R", row + 1, column + 1));
             }
             _ => log!("Unknown device status query: {}", arg),
         };
@@ -830,7 +840,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
             let base64 = Base64::encode_string(text.as_bytes());
             let result = format!("\x1b]52;{};{base64}{terminator}", clipboard as char);
-            CONFIG.pty_write(result);
+            self.pty_write(result);
         };
     }
 
@@ -861,7 +871,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn report_keyboard_mode(&mut self) {
         log!("Report keyboard mode!");
         let current_mode = KeyboardModes::NO_MODE.bits();
-        CONFIG.pty_write(format!("\x1b[?{current_mode}u"));
+        self.pty_write(format!("\x1b[?{current_mode}u"));
     }
 
     fn push_keyboard_mode(&mut self, mode: KeyboardModes) {

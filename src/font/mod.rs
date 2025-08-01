@@ -26,5 +26,5 @@ pub struct ContentInfo {
 
 pub trait FontManager: Send {
     fn size(&self) -> (usize, usize);
-    fn rasterize(&mut self, info: ContentInfo) -> Rasterized;
+    fn rasterize(&mut self, info: ContentInfo) -> Rasterized<'_>;
 }

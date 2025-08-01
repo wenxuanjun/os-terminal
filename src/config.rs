@@ -22,7 +22,6 @@ pub struct TerminalConfig {
     pub crnl_mapping: AtomicBool,
     pub logger: Mutex<Option<fn(fmt::Arguments)>>,
     pub clipboard: Mutex<Option<Clipboard>>,
-    pub pty_writer: Mutex<Option<PtyWriter>>,
     pub font_manager: Mutex<Option<Box<dyn FontManager>>>,
     pub color_scheme: Mutex<ColorScheme>,
     pub bell_handler: Mutex<Option<fn()>>,
@@ -35,18 +34,9 @@ impl Default for TerminalConfig {
             crnl_mapping: AtomicBool::new(false),
             logger: Default::default(),
             clipboard: Default::default(),
-            pty_writer: Default::default(),
             font_manager: Default::default(),
             color_scheme: Default::default(),
             bell_handler: Default::default(),
-        }
-    }
-}
-
-impl TerminalConfig {
-    pub fn pty_write(&self, data: String) {
-        if let Some(writer) = self.pty_writer.lock().as_ref() {
-            writer(data);
         }
     }
 }

@@ -13,7 +13,7 @@ impl FontManager for BitmapFont {
         (FONT_WIDTH, FONT_HEIGHT as usize)
     }
 
-    fn rasterize(&mut self, info: ContentInfo) -> Rasterized {
+    fn rasterize(&mut self, info: ContentInfo) -> Rasterized<'_> {
         let font_weight = if info.bold {
             FontWeight::Bold
         } else {
