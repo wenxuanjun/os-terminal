@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use std::{env, process};
 
 use keycode::{KeyMap, KeyMapping};
+use nix::errno::Errno;
 use nix::libc::{ioctl, TIOCSWINSZ};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, execvp, fork, read, write, ForkResult};
@@ -114,6 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             pending_draw.store(true, Ordering::Relaxed);
                         }
                         Ok(_) => break,
+                        Err(Errno::EIO) => process::exit(0),
                         Err(e) => {
                             eprintln!("Error reading from PTY: {:?}", e);
                             process::exit(1)
