@@ -4,16 +4,16 @@ use core::mem::swap;
 use core::ops::Range;
 
 use crate::cell::Cell;
-use crate::color::ToRgb;
 use crate::graphic::{DrawTarget, Graphic};
 
-const INIT_SIZE: (usize, usize) = (1, 1);
+const INIT_SIZE: Size = (1, 1);
 const DEFAULT_HISTORY_SIZE: usize = 200;
 
-pub struct TerminalBuffer<D: DrawTarget> {
-    graphic: Graphic<D>,
-    size: (usize, usize),
-    pixel_size: (usize, usize),
+type Size = (usize, usize);
+
+pub struct TerminalBuffer {
+    size: Size,
+    pixel_size: Size,
     alt_screen_mode: bool,
     flush_cache: Vec<Vec<Cell>>,
     start_row: usize,
@@ -23,7 +23,7 @@ pub struct TerminalBuffer<D: DrawTarget> {
     alt_buffer: VecDeque<Vec<Cell>>,
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
+impl TerminalBuffer {
     pub fn width(&self) -> usize {
         self.size.0
     }
@@ -33,12 +33,11 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn new(graphic: Graphic<D>) -> Self {
+impl Default for TerminalBuffer {
+    fn default() -> Self {
         let buffer = vec![vec![Cell::default(); INIT_SIZE.0]; INIT_SIZE.1];
 
         Self {
-            graphic,
             size: INIT_SIZE,
             pixel_size: (0, 0),
             alt_screen_mode: false,
@@ -50,7 +49,9 @@ impl<D: DrawTarget> TerminalBuffer<D> {
             history_size: DEFAULT_HISTORY_SIZE,
         }
     }
+}
 
+impl TerminalBuffer {
     pub fn swap_alt_screen(&mut self, cell: Cell) {
         self.alt_screen_mode = !self.alt_screen_mode;
         swap(&mut self.buffer, &mut self.alt_buffer);
@@ -61,14 +62,10 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         }
     }
 
-    pub fn update_size(&mut self, font_width: usize, font_height: usize) {
-        if font_width == 0 || font_height == 0 {
-            return;
-        }
-
-        let width = self.graphic.size().0 / font_width;
-        let height = self.graphic.size().1 / font_height;
-        self.pixel_size = (font_width * width, font_height * height);
+    pub fn update_size(&mut self, font_size: Size, graphic_size: Size) {
+        let width = graphic_size.0 / font_size.0;
+        let height = graphic_size.1 / font_size.1;
+        self.pixel_size = (font_size.0 * width, font_size.1 * height);
 
         if self.size != (width, height) {
             let buffer = vec![vec![Cell::default(); width]; height].into();
@@ -80,7 +77,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
+impl TerminalBuffer {
     pub fn read(&self, row: usize, col: usize) -> Cell {
         self.buffer[self.start_row + row][col]
     }
@@ -100,8 +97,11 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
-    pub fn flush(&mut self) {
+impl TerminalBuffer {
+    pub fn flush<D>(&mut self, graphic: &mut Graphic<D>)
+    where
+        D: DrawTarget,
+    {
         let start = self.start_row;
         let end = self.start_row + self.height();
         let buffer = self.buffer.range_mut(start..end);
@@ -109,40 +109,44 @@ impl<D: DrawTarget> TerminalBuffer<D> {
         for (i, row) in buffer.enumerate() {
             for (j, &cell) in row.iter().enumerate() {
                 if cell != self.flush_cache[i][j] {
-                    self.graphic.write(i, j, cell);
+                    graphic.write(i, j, cell);
                     self.flush_cache[i][j] = cell;
                 }
             }
         }
     }
 
-    pub fn full_flush(&mut self) {
+    pub fn full_flush<D>(&mut self, graphic: &mut Graphic<D>)
+    where
+        D: DrawTarget,
+    {
         let start = self.start_row;
         let end = self.start_row + self.height();
         let buffer = self.buffer.range_mut(start..end);
 
         for (i, row) in buffer.enumerate() {
             for (j, &cell) in row.iter().enumerate() {
-                self.graphic.write(i, j, cell);
+                graphic.write(i, j, cell);
             }
         }
 
-        let color = Cell::default().background.to_rgb();
+        let background = Cell::default().background;
+        let color = graphic.color_to_rgb(background);
 
-        for y in self.pixel_size.1..self.graphic.size().1 {
+        for y in self.pixel_size.1..graphic.size().1 {
             for x in 0..self.pixel_size.0 {
-                self.graphic.draw_pixel(x, y, color);
+                graphic.draw_pixel(x, y, color);
             }
         }
-        for y in 0..self.graphic.size().1 {
-            for x in self.pixel_size.0..self.graphic.size().0 {
-                self.graphic.draw_pixel(x, y, color);
+        for y in 0..graphic.size().1 {
+            for x in self.pixel_size.0..graphic.size().0 {
+                graphic.draw_pixel(x, y, color);
             }
         }
     }
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
+impl TerminalBuffer {
     pub fn clear_history(&mut self) {
         if !self.alt_screen_mode {
             self.buffer.drain(0..self.start_row);
@@ -166,7 +170,7 @@ impl<D: DrawTarget> TerminalBuffer<D> {
     }
 }
 
-impl<D: DrawTarget> TerminalBuffer<D> {
+impl TerminalBuffer {
     pub fn scroll_region(&mut self, count: isize, cell: Cell, region: Range<usize>) {
         let (top, bottom) = (region.start, region.end);
         let start_row = self.buffer.len() - self.height();

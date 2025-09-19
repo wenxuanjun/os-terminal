@@ -2,7 +2,6 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use core::mem::swap;
 use core::ops::Range;
-use core::sync::atomic::Ordering;
 use core::time::Duration;
 use core::{cmp::min, fmt};
 
@@ -17,12 +16,19 @@ use vte::ansi::{Handler, LineClearMode, Mode, NamedPrivateMode, PrivateMode};
 use crate::buffer::TerminalBuffer;
 use crate::cell::{Cell, Flags};
 use crate::color::ColorScheme;
-use crate::config::{Clipboard, PtyWriter, CONFIG};
 use crate::font::FontManager;
 use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
 use crate::mouse::{MouseEvent, MouseInput, MouseManager};
 use crate::palette::Palette;
+
+pub trait ClipboardHandler {
+    fn get_text(&mut self) -> Option<String>;
+    fn set_text(&mut self, text: String);
+}
+
+pub type PtyWriter = Box<dyn Fn(String) + Send>;
+pub type Clipboard = Box<dyn ClipboardHandler + Send>;
 
 #[derive(Default)]
 pub struct DummySyncHandler;
@@ -78,15 +84,20 @@ pub struct Terminal<D: DrawTarget> {
 }
 
 pub struct TerminalInner<D: DrawTarget> {
+    graphic: Graphic<D>,
     cursor: Cursor,
     saved_cursor: Cursor,
     alt_cursor: Cursor,
     mode: TerminalMode,
     attribute_template: Cell,
-    buffer: TerminalBuffer<D>,
+    buffer: TerminalBuffer,
     keyboard: KeyboardManager,
     mouse: MouseManager,
+    auto_flush: bool,
+    logger: Option<fn(fmt::Arguments)>,
     pty_writer: Option<PtyWriter>,
+    bell_handler: Option<fn()>,
+    clipboard: Option<Clipboard>,
     scroll_region: Range<usize>,
     charsets: [StandardCharset; 4],
     active_charset: CharsetIndex,
@@ -100,15 +111,20 @@ impl<D: DrawTarget> Terminal<D> {
         Self {
             performer: Processor::new(),
             inner: TerminalInner {
+                graphic,
                 cursor: Cursor::default(),
                 saved_cursor: Cursor::default(),
                 alt_cursor: Cursor::default(),
                 mode: TerminalMode::default(),
                 attribute_template: Cell::default(),
-                buffer: TerminalBuffer::new(graphic),
+                buffer: TerminalBuffer::default(),
                 keyboard: KeyboardManager::default(),
                 mouse: MouseManager::default(),
+                auto_flush: true,
                 pty_writer: Default::default(),
+                logger: None,
+                bell_handler: None,
+                clipboard: None,
                 scroll_region: Default::default(),
                 charsets: Default::default(),
                 active_charset: Default::default(),
@@ -125,7 +141,7 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn flush(&mut self) {
-        self.inner.buffer.flush();
+        self.inner.buffer.flush(&mut self.inner.graphic);
     }
 
     pub fn process(&mut self, bstr: &[u8]) {
@@ -134,9 +150,7 @@ impl<D: DrawTarget> Terminal<D> {
         if self.inner.mode.contains(TerminalMode::SHOW_CURSOR) {
             self.inner.cursor_handler(true);
         }
-        if CONFIG.auto_flush.load(Ordering::Relaxed) {
-            self.flush();
-        }
+        self.inner.auto_flush.then(|| self.flush());
     }
 }
 
@@ -155,16 +169,18 @@ impl<D: DrawTarget> Terminal<D> {
                 self.inner.pty_write(s);
             }
             KeyboardEvent::Paste => {
-                if let Some(clipboard) = CONFIG.clipboard.lock().as_mut() {
-                    let Some(text) = clipboard.get_text() else {
-                        return;
-                    };
+                let Some(clipboard) = self.inner.clipboard.as_mut() else {
+                    return;
+                };
 
-                    if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
-                        self.inner.pty_write(format!("\x1b[200~{text}\x1b[201~"));
-                    } else {
-                        self.inner.pty_write(text);
-                    }
+                let Some(text) = clipboard.get_text() else {
+                    return;
+                };
+
+                if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
+                    self.inner.pty_write(format!("\x1b[200~{text}\x1b[201~"));
+                } else {
+                    self.inner.pty_write(text);
                 }
             }
             _ => {}
@@ -172,8 +188,13 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn handle_mouse(&mut self, input: MouseInput) {
-        if let MouseEvent::Scroll(lines) = self.inner.mouse.handle_mouse(input) {
-            if self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+        match self.inner.mouse.handle_mouse(input) {
+            MouseEvent::Scroll(lines) => {
+                if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+                    self.inner.scroll_history(lines);
+                    return;
+                }
+
                 let key = DecodedKey::RawKey(if lines > 0 {
                     KeyCode::ArrowUp
                 } else {
@@ -186,28 +207,27 @@ impl<D: DrawTarget> Terminal<D> {
                         self.inner.pty_write(s.clone());
                     }
                 }
-            } else {
-                self.inner.scroll_history(lines);
             }
+            MouseEvent::None => {}
         }
     }
 }
 
 impl<D: DrawTarget> Terminal<D> {
     pub fn set_auto_flush(&mut self, auto_flush: bool) {
-        CONFIG.auto_flush.store(auto_flush, Ordering::Relaxed);
+        self.inner.auto_flush = auto_flush;
     }
 
     pub fn set_logger(&mut self, logger: fn(fmt::Arguments)) {
-        *CONFIG.logger.lock() = Some(logger);
+        self.inner.logger = Some(logger);
     }
 
     pub fn set_bell_handler(&mut self, handler: fn()) {
-        *CONFIG.bell_handler.lock() = Some(handler);
+        self.inner.bell_handler = Some(handler);
     }
 
     pub fn set_clipboard(&mut self, clipboard: Clipboard) {
-        *CONFIG.clipboard.lock() = Some(clipboard);
+        self.inner.clipboard = Some(clipboard);
     }
 
     pub fn set_pty_writer(&mut self, writer: PtyWriter) {
@@ -223,27 +243,28 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn set_crnl_mapping(&mut self, mapping: bool) {
-        CONFIG.crnl_mapping.store(mapping, Ordering::Relaxed);
+        self.inner.keyboard.crnl_mapping = mapping;
     }
 
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
-        let (font_width, font_height) = font_manager.size();
-        self.inner.buffer.update_size(font_width, font_height);
+        self.inner
+            .buffer
+            .update_size(font_manager.size(), self.inner.graphic.size());
         self.inner.scroll_region = 0..self.inner.buffer.height() - 1;
         self.inner.reset_state();
-        *CONFIG.font_manager.lock() = Some(font_manager);
+        self.inner.graphic.font_manager = Some(font_manager);
     }
 
     pub fn set_color_scheme(&mut self, palette_index: usize) {
-        *CONFIG.color_scheme.lock() = ColorScheme::new(palette_index);
+        self.inner.graphic.color_scheme = ColorScheme::new(palette_index);
         self.inner.attribute_template = Cell::default();
-        self.inner.buffer.full_flush();
+        self.inner.buffer.full_flush(&mut self.inner.graphic);
     }
 
     pub fn set_custom_color_scheme(&mut self, palette: &Palette) {
-        *CONFIG.color_scheme.lock() = ColorScheme::from(palette);
+        self.inner.graphic.color_scheme = ColorScheme::from(palette);
         self.inner.attribute_template = Cell::default();
-        self.inner.buffer.full_flush();
+        self.inner.buffer.full_flush(&mut self.inner.graphic);
     }
 }
 
@@ -278,17 +299,18 @@ impl<D: DrawTarget> TerminalInner<D> {
         self.buffer.write(row, column, origin_cell);
     }
 
+    fn log_message(&self, args: fmt::Arguments) {
+        self.logger.map(|logger| logger(args));
+    }
+
     fn pty_write(&self, data: String) {
-        if let Some(writer) = self.pty_writer.as_ref() {
-            writer(data);
-        }
+        self.pty_writer.as_ref().map(|writer| writer(data));
     }
 
     fn scroll_history(&mut self, count: isize) {
         self.buffer.scroll_history(count);
-        if CONFIG.auto_flush.load(Ordering::Relaxed) {
-            self.buffer.flush();
-        }
+        self.auto_flush
+            .then(|| self.buffer.flush(&mut self.graphic));
     }
 
     fn swap_alt_screen(&mut self) {
@@ -303,20 +325,26 @@ impl<D: DrawTarget> TerminalInner<D> {
     }
 }
 
+macro_rules! log {
+    ($self:ident, $($arg:tt)*) => {
+        $self.log_message(format_args!($($arg)*))
+    }
+}
+
 impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn set_title(&mut self, title: Option<String>) {
-        log!("Unhandled set_title: {:?}", title);
+        log!(self, "Unhandled set_title: {:?}", title);
     }
 
     fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
-        log!("Set cursor style: {:?}", style);
+        log!(self, "Set cursor style: {:?}", style);
         if let Some(style) = style {
             self.set_cursor_shape(style.shape);
         }
     }
 
     fn set_cursor_shape(&mut self, shape: CursorShape) {
-        log!("Set cursor shape: {:?}", shape);
+        log!(self, "Set cursor shape: {:?}", shape);
         self.cursor.shape = shape;
     }
 
@@ -355,17 +383,17 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn goto_line(&mut self, row: i32) {
-        log!("Goto line: {}", row);
+        log!(self, "Goto line: {}", row);
         self.goto(row, self.cursor.column);
     }
 
     fn goto_col(&mut self, col: usize) {
-        log!("Goto column: {}", col);
+        log!(self, "Goto column: {}", col);
         self.goto(self.cursor.row as i32, col);
     }
 
     fn insert_blank(&mut self, count: usize) {
-        log!("Insert blank: {}", count);
+        log!(self, "Insert blank: {}", count);
         let (row, columns) = (self.cursor.row, self.buffer.width());
         let count = min(count, columns - self.cursor.column);
 
@@ -378,7 +406,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn move_up(&mut self, rows: usize) {
-        log!("Move up: {}", rows);
+        log!(self, "Move up: {}", rows);
         self.goto(
             self.cursor.row.saturating_sub(rows) as i32,
             self.cursor.column,
@@ -386,13 +414,13 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn move_down(&mut self, rows: usize) {
-        log!("Move down: {}", rows);
+        log!(self, "Move down: {}", rows);
         let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as i32;
         self.goto(goto_line, self.cursor.column);
     }
 
     fn identify_terminal(&mut self, intermediate: Option<char>) {
-        log!("Identify terminal: {:?}", intermediate);
+        log!(self, "Identify terminal: {:?}", intermediate);
 
         let version_number = |version: &str| -> usize {
             let mut result = 0;
@@ -410,7 +438,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 let version = version_number(env!("CARGO_PKG_VERSION"));
                 self.pty_write(format!("\x1b[>0;{version};1c"));
             }
-            _ => log!("Unsupported device attributes intermediate"),
+            _ => log!(self, "Unsupported device attributes intermediate"),
         }
     }
 
@@ -421,33 +449,33 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
                 let (row, column) = (self.cursor.row, self.cursor.column);
                 self.pty_write(format!("\x1b[{};{}R", row + 1, column + 1));
             }
-            _ => log!("Unknown device status query: {}", arg),
+            _ => log!(self, "Unknown device status query: {}", arg),
         };
     }
 
     fn move_forward(&mut self, cols: usize) {
-        log!("Move forward: {}", cols);
+        log!(self, "Move forward: {}", cols);
         self.cursor.column = min(self.cursor.column + cols, self.buffer.width() - 1);
     }
 
     fn move_backward(&mut self, cols: usize) {
-        log!("Move backward: {}", cols);
+        log!(self, "Move backward: {}", cols);
         self.cursor.column = self.cursor.column.saturating_sub(cols);
     }
 
     fn move_up_and_cr(&mut self, rows: usize) {
-        log!("Move up and cr: {}", rows);
+        log!(self, "Move up and cr: {}", rows);
         self.goto(self.cursor.row.saturating_sub(rows) as i32, 0);
     }
 
     fn move_down_and_cr(&mut self, rows: usize) {
-        log!("Move down and cr: {}", rows);
+        log!(self, "Move down and cr: {}", rows);
         let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1);
         self.goto(goto_line as i32, 0);
     }
 
     fn put_tab(&mut self, count: u16) {
-        log!("Put tab: {}", count);
+        log!(self, "Put tab: {}", count);
         for _ in 0..count {
             let tab_stop = self.cursor.column.div_ceil(8) * 8;
             let end_column = tab_stop.min(self.buffer.width());
@@ -470,7 +498,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn linefeed(&mut self) {
-        if CONFIG.crnl_mapping.load(Ordering::Relaxed) {
+        if self.keyboard.crnl_mapping {
             self.carriage_return();
         }
 
@@ -482,12 +510,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn bell(&mut self) {
-        log!("Bell triggered!");
-        CONFIG.bell_handler.lock().map(|handler| handler());
+        log!(self, "Bell triggered!");
+        self.bell_handler.map(|handler| handler());
     }
 
     fn substitute(&mut self) {
-        log!("Unhandled substitute!");
+        log!(self, "Unhandled substitute!");
     }
 
     fn newline(&mut self) {
@@ -499,7 +527,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_horizontal_tabstop(&mut self) {
-        log!("Unhandled set horizontal tabstop!");
+        log!(self, "Unhandled set horizontal tabstop!");
     }
 
     fn scroll_up(&mut self, count: usize) {
@@ -519,17 +547,17 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn insert_blank_lines(&mut self, count: usize) {
-        log!("Insert blank lines: {}", count);
+        log!(self, "Insert blank lines: {}", count);
         self.scroll_down(count);
     }
 
     fn delete_lines(&mut self, count: usize) {
-        log!("Delete lines: {}", count);
+        log!(self, "Delete lines: {}", count);
         self.scroll_up(count);
     }
 
     fn erase_chars(&mut self, count: usize) {
-        log!("Erase chars: {}", count);
+        log!(self, "Erase chars: {}", count);
         let start = self.cursor.column;
         let end = min(start + count, self.buffer.width());
 
@@ -540,7 +568,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn delete_chars(&mut self, count: usize) {
-        log!("Delete chars: {}", count);
+        log!(self, "Delete chars: {}", count);
         let (row, width) = (self.cursor.row, self.buffer.width());
         let count = min(count, width - self.cursor.column - 1);
 
@@ -554,25 +582,25 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn move_backward_tabs(&mut self, count: u16) {
-        log!("Unhandled move backward tabs: {}", count);
+        log!(self, "Unhandled move backward tabs: {}", count);
     }
 
     fn move_forward_tabs(&mut self, count: u16) {
-        log!("Unhandled move forward tabs: {}", count);
+        log!(self, "Unhandled move forward tabs: {}", count);
     }
 
     fn save_cursor_position(&mut self) {
-        log!("Save cursor position");
+        log!(self, "Save cursor position");
         self.saved_cursor = self.cursor;
     }
 
     fn restore_cursor_position(&mut self) {
-        log!("Restore cursor position");
+        log!(self, "Restore cursor position");
         self.cursor = self.saved_cursor;
     }
 
     fn clear_line(&mut self, mode: LineClearMode) {
-        log!("Clear line: {:?}", mode);
+        log!(self, "Clear line: {:?}", mode);
         let template = self.attribute_template.clear();
         match mode {
             LineClearMode::Right => {
@@ -594,7 +622,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clear_screen(&mut self, mode: ClearMode) {
-        log!("Clear screen: {:?}", mode);
+        log!(self, "Clear screen: {:?}", mode);
         let template = self.attribute_template.clear();
 
         match mode {
@@ -629,11 +657,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn clear_tabs(&mut self, mode: TabulationClearMode) {
-        log!("Unhandled clear tabs: {:?}", mode);
+        log!(self, "Unhandled clear tabs: {:?}", mode);
     }
 
     fn reset_state(&mut self) {
-        log!("Reset state");
+        log!(self, "Reset state");
         if self.mode.contains(TerminalMode::ALT_SCREEN) {
             self.swap_alt_screen();
         }
@@ -646,7 +674,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn reverse_index(&mut self) {
-        log!("Reverse index");
+        log!(self, "Reverse index");
         if self.cursor.row == self.scroll_region.start {
             self.scroll_down(1);
         } else {
@@ -670,7 +698,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             Attr::CancelUnderline => self.attribute_template.flags.remove(Flags::UNDERLINE),
             Attr::Hidden => self.attribute_template.flags.insert(Flags::HIDDEN),
             Attr::CancelHidden => self.attribute_template.flags.remove(Flags::HIDDEN),
-            _ => log!("Unhandled terminal attribute: {:?}", attr),
+            _ => log!(self, "Unhandled terminal attribute: {:?}", attr),
         }
     }
 
@@ -678,7 +706,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let mode = match mode {
             Mode::Named(mode) => mode,
             Mode::Unknown(mode) => {
-                log!("Ignoring unknown mode {} in set_mode", mode);
+                log!(self, "Ignoring unknown mode {} in set_mode", mode);
                 return;
             }
         };
@@ -693,7 +721,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let mode = match mode {
             Mode::Named(mode) => mode,
             Mode::Unknown(mode) => {
-                log!("Ignoring unknown mode {} in unset_mode", mode);
+                log!(self, "Ignoring unknown mode {} in unset_mode", mode);
                 return;
             }
         };
@@ -705,14 +733,14 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn report_mode(&mut self, mode: Mode) {
-        log!("Unhandled report mode: {:?}", mode);
+        log!(self, "Unhandled report mode: {:?}", mode);
     }
 
     fn set_private_mode(&mut self, mode: PrivateMode) {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
-                log!("Ignoring unknown mode {} in set_private_mode", mode);
+                log!(self, "Ignoring unknown mode {} in set_private_mode", mode);
                 return;
             }
         };
@@ -726,11 +754,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             NamedPrivateMode::ShowCursor => self.mode.insert(TerminalMode::SHOW_CURSOR),
             NamedPrivateMode::CursorKeys => {
                 self.mode.insert(TerminalMode::APP_CURSOR);
-                self.keyboard.set_app_cursor(true);
+                self.keyboard.app_cursor_mode = true;
             }
             NamedPrivateMode::LineWrap => self.mode.insert(TerminalMode::LINE_WRAP),
             NamedPrivateMode::BracketedPaste => self.mode.insert(TerminalMode::BRACKETED_PASTE),
-            _ => log!("Unhandled set mode: {:?}", mode),
+            _ => log!(self, "Unhandled set mode: {:?}", mode),
         }
     }
 
@@ -738,7 +766,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
-                log!("Ignoring unknown mode {} in unset_private_mode", mode);
+                log!(self, "Ignoring unknown mode {} in unset_private_mode", mode);
                 return;
             }
         };
@@ -752,24 +780,29 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             NamedPrivateMode::ShowCursor => self.mode.remove(TerminalMode::SHOW_CURSOR),
             NamedPrivateMode::CursorKeys => {
                 self.mode.remove(TerminalMode::APP_CURSOR);
-                self.keyboard.set_app_cursor(false);
+                self.keyboard.app_cursor_mode = false;
             }
             NamedPrivateMode::LineWrap => self.mode.remove(TerminalMode::LINE_WRAP),
             NamedPrivateMode::BracketedPaste => self.mode.remove(TerminalMode::BRACKETED_PASTE),
-            _ => log!("Unhandled unset mode: {:?}", mode),
+            _ => log!(self, "Unhandled unset mode: {:?}", mode),
         }
     }
 
     fn report_private_mode(&mut self, mode: PrivateMode) {
-        log!("Unhandled report private mode: {:?}", mode);
+        log!(self, "Unhandled report private mode: {:?}", mode);
     }
 
     fn set_scrolling_region(&mut self, top: usize, bottom: Option<usize>) {
-        log!("Set scrolling region: top={}, bottom={:?}", top, bottom);
+        log!(
+            self,
+            "Set scrolling region: top={}, bottom={:?}",
+            top,
+            bottom
+        );
         let bottom = bottom.unwrap_or(self.buffer.height());
 
         if top >= bottom {
-            log!("Invalid scrolling region: ({};{})", top, bottom);
+            log!(self, "Invalid scrolling region: ({};{})", top, bottom);
             return;
         }
 
@@ -779,31 +812,32 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn set_keypad_application_mode(&mut self) {
-        log!("Set keypad application mode");
+        log!(self, "Set keypad application mode");
         self.mode.insert(TerminalMode::APP_KEYPAD);
     }
 
     fn unset_keypad_application_mode(&mut self) {
-        log!("Unset keypad application mode");
+        log!(self, "Unset keypad application mode");
         self.mode.remove(TerminalMode::APP_KEYPAD);
     }
 
     fn set_active_charset(&mut self, index: CharsetIndex) {
-        log!("Set active charset: {:?}", index);
+        log!(self, "Set active charset: {:?}", index);
         self.active_charset = index;
     }
 
     fn configure_charset(&mut self, index: CharsetIndex, charset: StandardCharset) {
-        log!("Configure charset: {:?}, {:?}", index, charset);
+        log!(self, "Configure charset: {:?}, {:?}", index, charset);
         self.charsets[index as usize] = charset;
     }
 
     fn set_color(&mut self, index: usize, color: Rgb) {
-        log!("Unhandled set color: {}, {:?}", index, color);
+        log!(self, "Unhandled set color: {}, {:?}", index, color);
     }
 
     fn dynamic_color_sequence(&mut self, prefix: String, index: usize, terminator: &str) {
         log!(
+            self,
             "Unhandled dynamic color sequence: {}, {}, {}",
             prefix,
             index,
@@ -812,11 +846,11 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn reset_color(&mut self, index: usize) {
-        log!("Unhandled reset color: {}", index);
+        log!(self, "Unhandled reset color: {}", index);
     }
 
     fn clipboard_store(&mut self, clipboard: u8, base64: &[u8]) {
-        log!("Clipboard store: {}, {:?}", clipboard, base64);
+        log!(self, "Clipboard store: {}, {:?}", clipboard, base64);
 
         let text = core::str::from_utf8(base64)
             .ok()
@@ -824,16 +858,14 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             .and_then(|bytes| String::from_utf8(bytes).ok());
 
         if let Some(text) = text {
-            if let Some(handler) = CONFIG.clipboard.lock().as_mut() {
-                handler.set_text(text);
-            }
+            self.clipboard.as_mut().map(|c| c.set_text(text));
         }
     }
 
     fn clipboard_load(&mut self, clipboard: u8, terminator: &str) {
-        log!("Clipboard load: {}, {}", clipboard, terminator);
+        log!(self, "Clipboard load: {}, {}", clipboard, terminator);
 
-        if let Some(handler) = CONFIG.clipboard.lock().as_mut() {
+        if let Some(handler) = self.clipboard.as_mut() {
             let Some(text) = handler.get_text() else {
                 return;
             };
@@ -845,40 +877,40 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     }
 
     fn decaln(&mut self) {
-        log!("Unhandled decaln!");
+        log!(self, "Unhandled decaln!");
     }
 
     fn push_title(&mut self) {
-        log!("Unhandled push title!");
+        log!(self, "Unhandled push title!");
     }
 
     fn pop_title(&mut self) {
-        log!("Unhandled pop title!");
+        log!(self, "Unhandled pop title!");
     }
 
     fn text_area_size_pixels(&mut self) {
-        log!("Unhandled text area size pixels!");
+        log!(self, "Unhandled text area size pixels!");
     }
 
     fn text_area_size_chars(&mut self) {
-        log!("Unhandled text area size chars!");
+        log!(self, "Unhandled text area size chars!");
     }
 
     fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
-        log!("Unhandled set hyperlink: {:?}", hyperlink);
+        log!(self, "Unhandled set hyperlink: {:?}", hyperlink);
     }
 
     fn report_keyboard_mode(&mut self) {
-        log!("Report keyboard mode!");
+        log!(self, "Report keyboard mode!");
         let current_mode = KeyboardModes::NO_MODE.bits();
         self.pty_write(format!("\x1b[?{current_mode}u"));
     }
 
     fn push_keyboard_mode(&mut self, mode: KeyboardModes) {
-        log!("Unhandled push keyboard mode: {:?}", mode);
+        log!(self, "Unhandled push keyboard mode: {:?}", mode);
     }
 
     fn pop_keyboard_modes(&mut self, to_pop: u16) {
-        log!("Unhandled pop keyboard modes: {}", to_pop);
+        log!(self, "Unhandled pop keyboard modes: {}", to_pop);
     }
 }

@@ -1,11 +1,12 @@
+use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use core::mem::swap;
 use core::ops::{Deref, DerefMut};
+use vte::ansi::Color;
 
 use crate::cell::{Cell, Flags};
-use crate::color::{Rgb, ToRgb};
-use crate::config::CONFIG;
-use crate::font::{ContentInfo, Rasterized};
+use crate::color::{ColorScheme, Rgb};
+use crate::font::{ContentInfo, FontManager, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
@@ -14,6 +15,8 @@ pub trait DrawTarget {
 
 pub struct Graphic<D: DrawTarget> {
     graphic: D,
+    pub(crate) color_scheme: ColorScheme,
+    pub(crate) font_manager: Option<Box<dyn FontManager>>,
     color_cache: BTreeMap<(Rgb, Rgb), ColorCache>,
 }
 
@@ -35,16 +38,33 @@ impl<D: DrawTarget> Graphic<D> {
     pub fn new(graphic: D) -> Self {
         Self {
             graphic,
+            color_scheme: ColorScheme::default(),
+            font_manager: None,
             color_cache: BTreeMap::new(),
         }
     }
 
     pub fn clear(&mut self, cell: Cell) {
-        let color = cell.background.to_rgb();
+        let color = self.color_to_rgb(cell.background);
 
         for y in 0..self.graphic.size().1 {
             for x in 0..self.graphic.size().0 {
                 self.graphic.draw_pixel(x, y, color);
+            }
+        }
+    }
+
+    pub fn color_to_rgb(&self, color: Color) -> Rgb {
+        match color {
+            Color::Spec(rgb) => (rgb.r, rgb.g, rgb.b),
+            Color::Named(color) => match color as usize {
+                256 => self.color_scheme.foreground,
+                257 => self.color_scheme.background,
+                index => self.color_scheme.ansi_colors[index],
+            },
+            Color::Indexed(index) => {
+                let color_scheme = &self.color_scheme;
+                color_scheme.ansi_colors[index as usize]
             }
         }
     }
@@ -56,8 +76,8 @@ impl<D: DrawTarget> Graphic<D> {
             return;
         }
 
-        let mut foreground = cell.foreground.to_rgb();
-        let mut background = cell.background.to_rgb();
+        let mut foreground = self.color_to_rgb(cell.foreground);
+        let mut background = self.color_to_rgb(cell.background);
 
         if cell.flags.intersects(Flags::INVERSE | Flags::CURSOR_BLOCK) {
             swap(&mut foreground, &mut background);
@@ -67,7 +87,7 @@ impl<D: DrawTarget> Graphic<D> {
             foreground = background;
         }
 
-        if let Some(font_manager) = CONFIG.font_manager.lock().as_mut() {
+        if let Some(font_manager) = self.font_manager.as_mut() {
             let (font_width, font_height) = font_manager.size();
             let (x_start, y_start) = (col * font_width, row * font_height);
 

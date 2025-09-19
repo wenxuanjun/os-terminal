@@ -1,11 +1,8 @@
 use alloc::string::{String, ToString};
-use core::sync::atomic::Ordering;
 use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::KeyCode::{self, *};
 use pc_keyboard::{DecodedKey, Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
-
-use crate::config::CONFIG;
 
 #[derive(Debug)]
 pub enum KeyboardEvent {
@@ -18,7 +15,8 @@ pub enum KeyboardEvent {
 }
 
 pub struct KeyboardManager {
-    app_cursor_mode: bool,
+    pub(crate) app_cursor_mode: bool,
+    pub(crate) crnl_mapping: bool,
     keyboard: Keyboard<Us104Key, ScancodeSet1>,
 }
 
@@ -26,6 +24,7 @@ impl Default for KeyboardManager {
     fn default() -> Self {
         Self {
             app_cursor_mode: false,
+            crnl_mapping: false,
             keyboard: Keyboard::new(
                 ScancodeSet1::new(),
                 Us104Key,
@@ -36,10 +35,6 @@ impl Default for KeyboardManager {
 }
 
 impl KeyboardManager {
-    pub fn set_app_cursor(&mut self, mode: bool) {
-        self.app_cursor_mode = mode;
-    }
-
     pub fn handle_keyboard(&mut self, scancode: u8) -> KeyboardEvent {
         self.keyboard
             .add_byte(scancode)
@@ -77,9 +72,7 @@ impl KeyboardManager {
             DecodedKey::Unicode(c) => match c {
                 '\x08' => KeyboardEvent::AnsiString("\x7f".to_string()),
                 '\x7f' => KeyboardEvent::AnsiString("\x1b[3~".to_string()),
-                '\n' if !CONFIG.crnl_mapping.load(Ordering::Relaxed) => {
-                    KeyboardEvent::AnsiString("\r".to_string())
-                }
+                '\n' if !self.crnl_mapping => KeyboardEvent::AnsiString("\r".to_string()),
                 _ => KeyboardEvent::AnsiString(c.to_string()),
             },
         }

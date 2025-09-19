@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.6.10"
+version = "0.6.11"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -29,7 +29,6 @@ truetype = ["dep:ab_glyph"]
 
 [dependencies]
 bitflags = "2.9.4"
-spin = "0.10.0"
 pc-keyboard = "0.8.0"
 unicode-width = "0.2.1"
 

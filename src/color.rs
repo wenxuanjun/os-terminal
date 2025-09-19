@@ -1,33 +1,6 @@
-use vte::ansi::Color;
-
-use crate::config::CONFIG;
 use crate::palette::{Palette, DEFAULT_PALETTE_INDEX, PALETTE};
 
 pub type Rgb = (u8, u8, u8);
-
-pub trait ToRgb {
-    fn to_rgb(self) -> Rgb;
-}
-
-impl ToRgb for Color {
-    fn to_rgb(self) -> Rgb {
-        match self {
-            Self::Spec(rgb) => (rgb.r, rgb.g, rgb.b),
-            Self::Named(color) => {
-                let color_scheme = CONFIG.color_scheme.lock();
-                match color as usize {
-                    256 => color_scheme.foreground,
-                    257 => color_scheme.background,
-                    index => color_scheme.ansi_colors[index],
-                }
-            }
-            Self::Indexed(index) => {
-                let color_scheme = CONFIG.color_scheme.lock();
-                color_scheme.ansi_colors[index as usize]
-            }
-        }
-    }
-}
 
 pub struct ColorScheme {
     pub foreground: Rgb,
@@ -43,10 +16,10 @@ impl Default for ColorScheme {
 
 impl ColorScheme {
     pub fn new(palette_index: usize) -> Self {
-        let palette = PALETTE
+        PALETTE
             .get(palette_index)
-            .unwrap_or(&PALETTE[DEFAULT_PALETTE_INDEX]);
-        ColorScheme::from(palette)
+            .unwrap_or(&PALETTE[DEFAULT_PALETTE_INDEX])
+            .into()
     }
 }
 
