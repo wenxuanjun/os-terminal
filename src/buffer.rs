@@ -78,13 +78,9 @@ impl TerminalBuffer {
 }
 
 impl TerminalBuffer {
-    pub fn read(&self, row: usize, col: usize) -> Cell {
-        self.buffer[self.start_row + row][col]
-    }
-
-    pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
+    pub fn row_mut(&mut self, row: usize) -> &mut [Cell] {
         let start_row = self.buffer.len() - self.height();
-        self.buffer[start_row + row][col] = cell;
+        &mut self.buffer[start_row + row]
     }
 
     pub fn clear(&mut self, cell: Cell) {

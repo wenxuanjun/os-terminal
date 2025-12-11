@@ -1,0 +1,22 @@
+[package]
+name = "os-terminal-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[[bin]]
+name = "terminal"
+path = "terminal.rs"
+doc = false
+test = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.os-terminal]
+path = ".."
+features = ["truetype"]
+default-features = false

@@ -251,7 +251,6 @@ impl<D: DrawTarget> Terminal<D> {
             .buffer
             .update_size(font_manager.size(), self.inner.graphic.size());
         self.inner.scroll_region = 0..self.inner.buffer.height() - 1;
-        self.inner.reset_state();
         self.inner.graphic.font_manager = Some(font_manager);
     }
 
@@ -280,7 +279,8 @@ impl<D: DrawTarget> TerminalInner<D> {
         let row = self.cursor.row % self.buffer.height();
         let column = self.cursor.column % self.buffer.width();
 
-        let mut origin_cell = self.buffer.read(row, column);
+        let row_slice = self.buffer.row_mut(row);
+        let cell = &mut row_slice[column];
 
         let flag = match self.cursor.shape {
             CursorShape::Block => Flags::CURSOR_BLOCK,
@@ -291,12 +291,10 @@ impl<D: DrawTarget> TerminalInner<D> {
         };
 
         if enable {
-            origin_cell.flags.insert(flag);
+            cell.flags.insert(flag);
         } else {
-            origin_cell.flags.remove(flag);
+            cell.flags.remove(flag);
         }
-
-        self.buffer.write(row, column, origin_cell);
     }
 
     fn log_message(&self, args: fmt::Arguments) {
@@ -363,17 +361,22 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             self.carriage_return();
         }
 
-        self.buffer
-            .write(self.cursor.row, self.cursor.column, template);
-        self.cursor.column += 1;
+        let row = self.cursor.row;
+        let col = self.cursor.column;
 
-        if template.wide {
-            self.buffer.write(
-                self.cursor.row,
-                self.cursor.column,
-                template.set_placeholder(),
-            );
-            self.cursor.column += 1;
+        if row < self.buffer.height() {
+            let row_slice = self.buffer.row_mut(row);
+            let slice_len = row_slice.len();
+
+            if col < slice_len {
+                row_slice[col] = template;
+                self.cursor.column += 1;
+            }
+
+            if template.wide && (col + 1) < slice_len {
+                row_slice[col + 1] = template.set_placeholder();
+                self.cursor.column += 1;
+            }
         }
     }
 
@@ -394,29 +397,30 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn insert_blank(&mut self, count: usize) {
         log!(self, "Insert blank: {}", count);
-        let (row, columns) = (self.cursor.row, self.buffer.width());
-        let count = min(count, columns - self.cursor.column);
+        if self.cursor.column >= self.buffer.width() {
+            return;
+        }
+
+        let (col, width) = (self.cursor.column, self.buffer.width());
+        let count = min(count, width - col);
 
         let template = self.attribute_template.clear();
-        for column in (self.cursor.column..columns - count).rev() {
-            self.buffer
-                .write(row, column + count, self.buffer.read(row, column));
-            self.buffer.write(row, column, template);
-        }
+        let row_slice = self.buffer.row_mut(self.cursor.row);
+
+        row_slice.copy_within(col..(width - count), col + count);
+        row_slice[col..(col + count)].fill(template);
     }
 
     fn move_up(&mut self, rows: usize) {
         log!(self, "Move up: {}", rows);
-        self.goto(
-            self.cursor.row.saturating_sub(rows) as i32,
-            self.cursor.column,
-        );
+        let goto_line = self.cursor.row.saturating_sub(rows);
+        self.goto(goto_line as i32, self.cursor.column);
     }
 
     fn move_down(&mut self, rows: usize) {
         log!(self, "Move down: {}", rows);
-        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1) as i32;
-        self.goto(goto_line, self.cursor.column);
+        let goto_line = min(self.cursor.row + rows, self.buffer.height() - 1);
+        self.goto(goto_line as i32, self.cursor.column);
     }
 
     fn identify_terminal(&mut self, intermediate: Option<char>) {
@@ -476,16 +480,19 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn put_tab(&mut self, count: u16) {
         log!(self, "Put tab: {}", count);
-        for _ in 0..count {
-            let tab_stop = self.cursor.column.div_ceil(8) * 8;
-            let end_column = tab_stop.min(self.buffer.width());
-            let template = self.attribute_template.clear();
+        if self.cursor.column >= self.buffer.width() {
+            return;
+        }
 
-            while self.cursor.column < end_column {
-                self.buffer
-                    .write(self.cursor.row, self.cursor.column, template);
-                self.cursor.column += 1;
-            }
+        let target_column = (self.cursor.column / 8 + count as usize) * 8;
+        let end_column = min(target_column, self.buffer.width());
+
+        if end_column > self.cursor.column {
+            let template = self.attribute_template.clear();
+            let row_slice = self.buffer.row_mut(self.cursor.row);
+
+            row_slice[self.cursor.column..end_column].fill(template);
+            self.cursor.column = end_column;
         }
     }
 
@@ -562,31 +569,45 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let end = min(start + count, self.buffer.width());
 
         let template = self.attribute_template.clear();
-        for column in start..end {
-            self.buffer.write(self.cursor.row, column, template);
-        }
+        let row_slice = self.buffer.row_mut(self.cursor.row);
+        row_slice[start..end].fill(template);
     }
 
     fn delete_chars(&mut self, count: usize) {
         log!(self, "Delete chars: {}", count);
-        let (row, width) = (self.cursor.row, self.buffer.width());
-        let count = min(count, width - self.cursor.column - 1);
-
-        for i in self.cursor.column..width - count {
-            self.buffer.write(row, i, self.buffer.read(row, i + count));
+        if self.cursor.column >= self.buffer.width() {
+            return;
         }
 
-        for i in width - count..width {
-            self.buffer.write(row, i, self.attribute_template.clear());
-        }
+        let (col, width) = (self.cursor.column, self.buffer.width());
+        let count = min(count, width - col);
+
+        let row_slice = self.buffer.row_mut(self.cursor.row);
+        row_slice.copy_within((col + count)..width, col);
+
+        let template = self.attribute_template.clear();
+        row_slice[(width - count)..width].fill(template);
     }
 
     fn move_backward_tabs(&mut self, count: u16) {
-        log!(self, "Unhandled move backward tabs: {}", count);
+        log!(self, "Move backward tabs: {}", count);
+        if self.cursor.column == 0 {
+            return;
+        }
+
+        let current_index = (self.cursor.column - 1) / 8;
+        let target_index = current_index.saturating_sub(count as usize);
+        self.cursor.column = target_index * 8;
     }
 
     fn move_forward_tabs(&mut self, count: u16) {
-        log!(self, "Unhandled move forward tabs: {}", count);
+        log!(self, "Move forward tabs: {}", count);
+        if self.cursor.column >= self.buffer.width() {
+            return;
+        }
+
+        let target_column = (self.cursor.column / 8 + count as usize) * 8;
+        self.cursor.column = min(target_column, self.buffer.width());
     }
 
     fn save_cursor_position(&mut self) {
@@ -601,28 +622,28 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn clear_line(&mut self, mode: LineClearMode) {
         log!(self, "Clear line: {:?}", mode);
+
         let template = self.attribute_template.clear();
+        let width = self.buffer.width();
+        let row_slice = self.buffer.row_mut(self.cursor.row);
+
         match mode {
-            LineClearMode::Right => {
-                for column in self.cursor.column..self.buffer.width() {
-                    self.buffer.write(self.cursor.row, column, template);
-                }
-            }
+            LineClearMode::All => row_slice.fill(template),
             LineClearMode::Left => {
-                for column in 0..=self.cursor.column {
-                    self.buffer.write(self.cursor.row, column, template);
-                }
+                let end = min(self.cursor.column, width - 1);
+                row_slice[0..=end].fill(template);
             }
-            LineClearMode::All => {
-                for column in 0..self.buffer.width() {
-                    self.buffer.write(self.cursor.row, column, template);
-                }
+            LineClearMode::Right => {
+                let start = min(self.cursor.column, width);
+                row_slice[start..width].fill(template);
             }
         }
     }
 
     fn clear_screen(&mut self, mode: ClearMode) {
         log!(self, "Clear screen: {:?}", mode);
+
+        let width = self.buffer.width();
         let template = self.attribute_template.clear();
 
         match mode {
@@ -635,22 +656,18 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             }
             ClearMode::Above => {
                 for row in 0..self.cursor.row {
-                    for column in 0..self.buffer.width() {
-                        self.buffer.write(row, column, template);
-                    }
+                    self.buffer.row_mut(row).fill(template);
                 }
-                for column in 0..=self.cursor.column {
-                    self.buffer.write(self.cursor.row, column, template);
-                }
+                let end = min(self.cursor.column + 1, width);
+                self.buffer.row_mut(self.cursor.row)[0..end].fill(template);
             }
             ClearMode::Below => {
-                for column in self.cursor.column..self.buffer.width() {
-                    self.buffer.write(self.cursor.row, column, template);
+                if self.cursor.column < width {
+                    let row_slice = self.buffer.row_mut(self.cursor.row);
+                    row_slice[self.cursor.column..width].fill(template);
                 }
                 for row in self.cursor.row + 1..self.buffer.height() {
-                    for column in 0..self.buffer.width() {
-                        self.buffer.write(row, column, template);
-                    }
+                    self.buffer.row_mut(row).fill(template);
                 }
             }
         }
@@ -678,7 +695,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         if self.cursor.row == self.scroll_region.start {
             self.scroll_down(1);
         } else {
-            self.cursor.row -= 1;
+            self.cursor.row = self.cursor.row.saturating_sub(1);
         }
     }
 

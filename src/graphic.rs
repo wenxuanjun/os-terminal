@@ -14,7 +14,7 @@ pub trait DrawTarget {
 }
 
 pub struct Graphic<D: DrawTarget> {
-    graphic: D,
+    display: D,
     pub(crate) color_scheme: ColorScheme,
     pub(crate) font_manager: Option<Box<dyn FontManager>>,
     color_cache: BTreeMap<(Rgb, Rgb), ColorCache>,
@@ -24,20 +24,20 @@ impl<D: DrawTarget> Deref for Graphic<D> {
     type Target = D;
 
     fn deref(&self) -> &Self::Target {
-        &self.graphic
+        &self.display
     }
 }
 
 impl<D: DrawTarget> DerefMut for Graphic<D> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.graphic
+        &mut self.display
     }
 }
 
 impl<D: DrawTarget> Graphic<D> {
-    pub fn new(graphic: D) -> Self {
+    pub fn new(display: D) -> Self {
         Self {
-            graphic,
+            display,
             color_scheme: ColorScheme::default(),
             font_manager: None,
             color_cache: BTreeMap::new(),
@@ -47,9 +47,9 @@ impl<D: DrawTarget> Graphic<D> {
     pub fn clear(&mut self, cell: Cell) {
         let color = self.color_to_rgb(cell.background);
 
-        for y in 0..self.graphic.size().1 {
-            for x in 0..self.graphic.size().0 {
-                self.graphic.draw_pixel(x, y, color);
+        for y in 0..self.display.size().1 {
+            for x in 0..self.display.size().0 {
+                self.display.draw_pixel(x, y, color);
             }
         }
     }
@@ -108,7 +108,7 @@ impl<D: DrawTarget> Graphic<D> {
                     for (y, lines) in $raster.iter().enumerate() {
                         for (x, &intensity) in lines.iter().enumerate() {
                             let (r, g, b) = color_cache.0[intensity as usize];
-                            self.graphic.draw_pixel(x_start + x, y_start + y, (r, g, b));
+                            self.display.draw_pixel(x_start + x, y_start + y, (r, g, b));
                         }
                     }
                 };
@@ -123,7 +123,7 @@ impl<D: DrawTarget> Graphic<D> {
             if cell.flags.contains(Flags::CURSOR_BEAM) {
                 let (r, g, b) = color_cache.0[0xff];
                 (0..font_height)
-                    .for_each(|y| self.graphic.draw_pixel(x_start, y_start + y, (r, g, b)));
+                    .for_each(|y| self.display.draw_pixel(x_start, y_start + y, (r, g, b)));
             }
 
             if cell
@@ -133,7 +133,7 @@ impl<D: DrawTarget> Graphic<D> {
                 let (r, g, b) = color_cache.0[0xff];
                 let y_base = y_start + font_height - 1;
                 (0..font_width)
-                    .for_each(|x| self.graphic.draw_pixel(x_start + x, y_base, (r, g, b)));
+                    .for_each(|x| self.display.draw_pixel(x_start + x, y_base, (r, g, b)));
             }
         }
     }

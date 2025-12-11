@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.6.11"
+version = "0.6.12"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -28,9 +28,9 @@ bitmap = ["dep:noto-sans-mono-bitmap"]
 truetype = ["dep:ab_glyph"]
 
 [dependencies]
-bitflags = "2.9.4"
+bitflags = "2.10.0"
 pc-keyboard = "0.8.0"
-unicode-width = "0.2.1"
+unicode-width = "0.2.2"
 
 [dependencies.vte]
 version = "0.15.0"
@@ -42,7 +42,7 @@ version = "1.8.0"
 features = ["alloc"]
 
 [dependencies.ab_glyph]
-version = "0.2.31"
+version = "0.2.32"
 features = ["libm", "variable-fonts"]
 optional = true
 default-features = false
