@@ -27,7 +27,8 @@ pub trait ClipboardHandler {
     fn set_text(&mut self, text: String);
 }
 
-pub type PtyWriter = Box<dyn Fn(&str) + Send>;
+pub type PtyWriter = Box<dyn FnMut(&str) + Send>;
+pub type BellHandler = Box<dyn FnMut() + Send>;
 pub type Clipboard = Box<dyn ClipboardHandler + Send>;
 
 #[derive(Default)]
@@ -96,7 +97,7 @@ pub struct TerminalInner<D: DrawTarget> {
     auto_flush: bool,
     logger: Option<fn(fmt::Arguments)>,
     pty_writer: Option<PtyWriter>,
-    bell_handler: Option<fn()>,
+    bell_handler: Option<BellHandler>,
     clipboard: Option<Clipboard>,
     scroll_region: Range<usize>,
     charsets: [StandardCharset; 4],
@@ -222,7 +223,7 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.logger = Some(logger);
     }
 
-    pub fn set_bell_handler(&mut self, handler: fn()) {
+    pub fn set_bell_handler(&mut self, handler: BellHandler) {
         self.inner.bell_handler = Some(handler);
     }
 
@@ -300,8 +301,8 @@ impl<D: DrawTarget> TerminalInner<D> {
         }
     }
 
-    fn pty_write(&self, data: &str) {
-        self.pty_writer.as_ref().map(|writer| writer(data));
+    fn pty_write(&mut self, data: &str) {
+        self.pty_writer.as_mut().map(|writer| writer(data));
     }
 
     fn log_message(&self, args: fmt::Arguments) {
@@ -521,7 +522,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn bell(&mut self) {
         log!(self, "Bell triggered!");
-        self.bell_handler.map(|handler| handler());
+        self.bell_handler.as_mut().map(|handler| handler());
     }
 
     fn substitute(&mut self) {
