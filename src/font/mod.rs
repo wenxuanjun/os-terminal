@@ -16,7 +16,7 @@ pub enum Rasterized<'a> {
     Owned(Vec<Vec<u8>>),
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, PartialEq, Eq, Hash)]
 pub struct ContentInfo {
     pub content: char,
     pub bold: bool,

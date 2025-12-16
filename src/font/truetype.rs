@@ -1,5 +1,8 @@
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont, VariableFont};
-use alloc::{collections::BTreeMap, vec::Vec};
+use ab_glyph::{Font, FontRef, PxScale};
+use ab_glyph::{ScaleFont, VariableFont};
+use alloc::vec::Vec;
+use core::num::NonZeroUsize;
+use lru::LruCache;
 
 use super::{ContentInfo, FontManager, Rasterized};
 
@@ -10,7 +13,7 @@ pub struct TrueTypeFont {
     raster_width: usize,
     font_size: PxScale,
     base_line_offset: f32,
-    bitmap_cache: BTreeMap<ContentInfo, Vec<Vec<u8>>>,
+    bitmap_cache: LruCache<ContentInfo, Vec<Vec<u8>>>,
 }
 
 impl TrueTypeFont {
@@ -29,8 +32,14 @@ impl TrueTypeFont {
             raster_width: (line_height / 2.0) as usize,
             font_size,
             base_line_offset,
-            bitmap_cache: BTreeMap::new(),
+            bitmap_cache: LruCache::new(NonZeroUsize::new(512).unwrap()),
         }
+    }
+    
+    pub fn with_cache_size(mut self, size: usize) -> Self {
+        assert!(size > 0, "Cache size must be greater than 0");
+        self.bitmap_cache.resize(NonZeroUsize::new(size).unwrap());
+        self
     }
 
     pub fn with_italic_font(mut self, italic_font: &'static [u8]) -> Self {
@@ -45,7 +54,7 @@ impl FontManager for TrueTypeFont {
     }
 
     fn rasterize(&mut self, info: ContentInfo) -> Rasterized<'_> {
-        Rasterized::Vec(self.bitmap_cache.entry(info.clone()).or_insert_with(|| {
+        Rasterized::Vec(self.bitmap_cache.get_or_insert(info.clone(), || {
             let select_font = self
                 .italic_font
                 .as_mut()

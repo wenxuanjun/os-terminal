@@ -1,7 +1,8 @@
 use alloc::boxed::Box;
-use alloc::collections::btree_map::BTreeMap;
 use core::mem::swap;
+use core::num::NonZeroUsize;
 use core::ops::{Deref, DerefMut};
+use lru::LruCache;
 use vte::ansi::Color;
 
 use crate::cell::{Cell, Flags};
@@ -17,7 +18,7 @@ pub struct Graphic<D: DrawTarget> {
     display: D,
     pub(crate) color_scheme: ColorScheme,
     pub(crate) font_manager: Option<Box<dyn FontManager>>,
-    color_cache: BTreeMap<(Rgb, Rgb), ColorCache>,
+    color_cache: LruCache<(Rgb, Rgb), ColorCache>,
 }
 
 impl<D: DrawTarget> Deref for Graphic<D> {
@@ -40,15 +41,23 @@ impl<D: DrawTarget> Graphic<D> {
             display,
             color_scheme: ColorScheme::default(),
             font_manager: None,
-            color_cache: BTreeMap::new(),
+            color_cache: LruCache::new(NonZeroUsize::new(128).unwrap()),
         }
     }
 
+    pub fn set_cache_size(&mut self, size: usize) {
+        assert!(size > 0, "Cache size must be greater than 0");
+        self.color_cache.resize(NonZeroUsize::new(size).unwrap());
+    }
+}
+
+impl<D: DrawTarget> Graphic<D> {
     pub fn clear(&mut self, cell: Cell) {
+        let (width, height) = self.display.size();
         let color = self.color_to_rgb(cell.background);
 
-        for y in 0..self.display.size().1 {
-            for x in 0..self.display.size().0 {
+        for y in 0..height {
+            for x in 0..width {
                 self.display.draw_pixel(x, y, color);
             }
         }
@@ -93,8 +102,9 @@ impl<D: DrawTarget> Graphic<D> {
 
             let color_cache = self
                 .color_cache
-                .entry((foreground, background))
-                .or_insert_with(|| ColorCache::new(foreground, background));
+                .get_or_insert((foreground, background), || {
+                    ColorCache::new(foreground, background)
+                });
 
             let content_info = ContentInfo {
                 content: cell.content,

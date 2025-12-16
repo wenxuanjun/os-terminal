@@ -27,7 +27,7 @@ pub trait ClipboardHandler {
     fn set_text(&mut self, text: String);
 }
 
-pub type PtyWriter = Box<dyn Fn(String) + Send>;
+pub type PtyWriter = Box<dyn Fn(&str) + Send>;
 pub type Clipboard = Box<dyn ClipboardHandler + Send>;
 
 #[derive(Default)]
@@ -121,13 +121,13 @@ impl<D: DrawTarget> Terminal<D> {
                 keyboard: KeyboardManager::default(),
                 mouse: MouseManager::default(),
                 auto_flush: true,
-                pty_writer: Default::default(),
+                pty_writer: None,
                 logger: None,
                 bell_handler: None,
                 clipboard: None,
-                scroll_region: Default::default(),
+                scroll_region: Range::default(),
                 charsets: Default::default(),
-                active_charset: Default::default(),
+                active_charset: CharsetIndex::default(),
             },
         }
     }
@@ -166,7 +166,7 @@ impl<D: DrawTarget> Terminal<D> {
             }
             KeyboardEvent::AnsiString(s) => {
                 self.inner.buffer.ensure_latest();
-                self.inner.pty_write(s);
+                self.inner.pty_write(&s);
             }
             KeyboardEvent::Paste => {
                 let Some(clipboard) = self.inner.clipboard.as_mut() else {
@@ -178,9 +178,9 @@ impl<D: DrawTarget> Terminal<D> {
                 };
 
                 if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
-                    self.inner.pty_write(format!("\x1b[200~{text}\x1b[201~"));
+                    self.inner.pty_write(&format!("\x1b[200~{text}\x1b[201~"));
                 } else {
-                    self.inner.pty_write(text);
+                    self.inner.pty_write(&text);
                 }
             }
             _ => {}
@@ -191,21 +191,21 @@ impl<D: DrawTarget> Terminal<D> {
         match self.inner.mouse.handle_mouse(input) {
             MouseEvent::Scroll(lines) => {
                 if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
-                    self.inner.scroll_history(lines);
-                    return;
+                    return self.inner.scroll_history(lines);
                 }
 
-                let key = DecodedKey::RawKey(if lines > 0 {
+                let key_code = if lines > 0 {
                     KeyCode::ArrowUp
                 } else {
                     KeyCode::ArrowDown
-                });
+                };
 
-                let e = self.inner.keyboard.key_to_event(key);
-                if let KeyboardEvent::AnsiString(s) = e {
-                    for _ in 0..lines.unsigned_abs() {
-                        self.inner.pty_write(s.clone());
-                    }
+                if let KeyboardEvent::AnsiString(s) = self
+                    .inner
+                    .keyboard
+                    .key_to_event(DecodedKey::RawKey(key_code))
+                {
+                    self.inner.pty_write(&s.repeat(lines.unsigned_abs()));
                 }
             }
             MouseEvent::None => {}
@@ -246,6 +246,10 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.keyboard.crnl_mapping = mapping;
     }
 
+    pub fn set_color_cache_size(&mut self, size: usize) {
+        self.inner.graphic.set_cache_size(size);
+    }
+
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         self.inner
             .buffer
@@ -279,9 +283,6 @@ impl<D: DrawTarget> TerminalInner<D> {
         let row = self.cursor.row % self.buffer.height();
         let column = self.cursor.column % self.buffer.width();
 
-        let row_slice = self.buffer.row_mut(row);
-        let cell = &mut row_slice[column];
-
         let flag = match self.cursor.shape {
             CursorShape::Block => Flags::CURSOR_BLOCK,
             CursorShape::Underline => Flags::CURSOR_UNDERLINE,
@@ -290,19 +291,21 @@ impl<D: DrawTarget> TerminalInner<D> {
             CursorShape::Hidden => Flags::HIDDEN,
         };
 
+        let row_slice = self.buffer.row_mut(row);
+
         if enable {
-            cell.flags.insert(flag);
+            row_slice[column].flags.insert(flag);
         } else {
-            cell.flags.remove(flag);
+            row_slice[column].flags.remove(flag);
         }
+    }
+
+    fn pty_write(&self, data: &str) {
+        self.pty_writer.as_ref().map(|writer| writer(data));
     }
 
     fn log_message(&self, args: fmt::Arguments) {
         self.logger.map(|logger| logger(args));
-    }
-
-    fn pty_write(&self, data: String) {
-        self.pty_writer.as_ref().map(|writer| writer(data));
     }
 
     fn scroll_history(&mut self, count: isize) {
@@ -437,10 +440,10 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         };
 
         match intermediate {
-            None => self.pty_write(String::from("\x1b[?6c")),
+            None => self.pty_write("\x1b[?6c"),
             Some('>') => {
                 let version = version_number(env!("CARGO_PKG_VERSION"));
-                self.pty_write(format!("\x1b[>0;{version};1c"));
+                self.pty_write(&format!("\x1b[>0;{version};1c"));
             }
             _ => log!(self, "Unsupported device attributes intermediate"),
         }
@@ -448,13 +451,13 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn device_status(&mut self, arg: usize) {
         match arg {
-            5 => self.pty_write(String::from("\x1b[0n")),
+            5 => self.pty_write("\x1b[0n"),
             6 => {
                 let (row, column) = (self.cursor.row, self.cursor.column);
-                self.pty_write(format!("\x1b[{};{}R", row + 1, column + 1));
+                self.pty_write(&format!("\x1b[{};{}R", row + 1, column + 1));
             }
             _ => log!(self, "Unknown device status query: {}", arg),
-        };
+        }
     }
 
     fn move_forward(&mut self, cols: usize) {
@@ -642,7 +645,6 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn clear_screen(&mut self, mode: ClearMode) {
         log!(self, "Clear screen: {:?}", mode);
-
         let width = self.buffer.width();
         let template = self.attribute_template.clear();
 
@@ -783,7 +785,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
-                log!(self, "Ignoring unknown mode {} in unset_private_mode", mode);
+                log!(self, "Ignoring unknown mode {} in unset private mode", mode);
                 return;
             }
         };
@@ -889,8 +891,8 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
             let base64 = Base64::encode_string(text.as_bytes());
             let result = format!("\x1b]52;{};{base64}{terminator}", clipboard as char);
-            self.pty_write(result);
-        };
+            self.pty_write(&result);
+        }
     }
 
     fn decaln(&mut self) {
@@ -920,7 +922,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
     fn report_keyboard_mode(&mut self) {
         log!(self, "Report keyboard mode!");
         let current_mode = KeyboardModes::NO_MODE.bits();
-        self.pty_write(format!("\x1b[?{current_mode}u"));
+        self.pty_write(&format!("\x1b[?{current_mode}u"));
     }
 
     fn push_keyboard_mode(&mut self, mode: KeyboardModes) {

@@ -18,7 +18,6 @@ pub mod font;
 
 pub use color::Rgb;
 pub use graphic::DrawTarget;
-pub use keyboard::KeyboardManager;
 pub use mouse::{MouseButton, MouseInput};
 pub use palette::Palette;
 pub use terminal::{ClipboardHandler, Terminal};

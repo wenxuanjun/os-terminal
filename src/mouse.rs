@@ -15,8 +15,8 @@ pub enum MouseInput {
 
 #[derive(Debug)]
 pub enum MouseEvent {
-    Scroll(isize),
     None,
+    Scroll(isize),
 }
 
 pub struct MouseManager {
@@ -34,7 +34,7 @@ impl MouseManager {
         self.scroll_speed = speed;
     }
 
-    pub fn handle_mouse(&mut self, event: MouseInput) -> MouseEvent {
+    pub fn handle_mouse(&self, event: MouseInput) -> MouseEvent {
         match event {
             MouseInput::Scroll(lines) => {
                 let lines = lines * self.scroll_speed as isize;

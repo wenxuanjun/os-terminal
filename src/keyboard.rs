@@ -6,12 +6,12 @@ use pc_keyboard::{HandleControl, ScancodeSet1};
 
 #[derive(Debug)]
 pub enum KeyboardEvent {
+    None,
     AnsiString(String),
     Copy,
     Paste,
     SetColorScheme(usize),
     Scroll { up: bool, page: bool },
-    None,
 }
 
 pub struct KeyboardManager {

@@ -75,10 +75,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             terminal.set_scroll_speed(5);
             terminal.set_logger(|args| println!("Terminal: {:?}", args));
             terminal.set_clipboard(Box::new(Clipboard::new()));
+            terminal.set_color_cache_size(4096);
 
             terminal.set_pty_writer({
                 let ansi_sender = ansi_sender.clone();
-                Box::new(move |data| ansi_sender.send(data).unwrap())
+                Box::new(move |data| ansi_sender.send(data.to_string()).unwrap())
             });
 
             let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");

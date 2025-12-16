@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.6.12"
+version = "0.6.13"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -29,6 +29,7 @@ truetype = ["dep:ab_glyph"]
 
 [dependencies]
 bitflags = "2.10.0"
+lru = "0.16.2"
 pc-keyboard = "0.8.0"
 unicode-width = "0.2.2"
 
@@ -77,6 +78,6 @@ features = ["rwh_06", "x11", "wayland"]
 default-features = false
 
 [dev-dependencies.softbuffer]
-version = "0.4.6"
+version = "0.4.8"
 features = ["x11", "wayland"]
 default-features = false
