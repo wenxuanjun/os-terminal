@@ -127,16 +127,17 @@ impl TerminalBuffer {
         }
 
         let background = Cell::default().background;
-        let color = graphic.color_to_rgb(background);
+        let rgb = graphic.color_to_rgb(background);
+        let pixel = graphic.rgb_to_pixel(rgb);
 
         for y in self.pixel_size.1..graphic.size().1 {
             for x in 0..self.pixel_size.0 {
-                graphic.draw_pixel(x, y, color);
+                graphic.draw_pixel(x, y, pixel);
             }
         }
         for y in 0..graphic.size().1 {
             for x in self.pixel_size.0..graphic.size().0 {
-                graphic.draw_pixel(x, y, color);
+                graphic.draw_pixel(x, y, pixel);
             }
         }
     }

@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "os-terminal"
-version = "0.6.14"
+version = "0.6.15"
 dependencies = [
  "ab_glyph",
  "arboard",

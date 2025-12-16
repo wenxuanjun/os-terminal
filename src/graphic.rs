@@ -11,7 +11,8 @@ use crate::font::{ContentInfo, FontManager, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
-    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb);
+    fn draw_pixel(&mut self, x: usize, y: usize, pixel: u32);
+    fn rgb_to_pixel(&self, rgb: Rgb) -> u32;
 }
 
 pub struct Graphic<D: DrawTarget> {
@@ -54,11 +55,12 @@ impl<D: DrawTarget> Graphic<D> {
 impl<D: DrawTarget> Graphic<D> {
     pub fn clear(&mut self, cell: Cell) {
         let (width, height) = self.display.size();
-        let color = self.color_to_rgb(cell.background);
+        let rgb = self.color_to_rgb(cell.background);
+        let pixel = self.display.rgb_to_pixel(rgb);
 
         for y in 0..height {
             for x in 0..width {
-                self.display.draw_pixel(x, y, color);
+                self.display.draw_pixel(x, y, pixel);
             }
         }
     }
@@ -103,7 +105,7 @@ impl<D: DrawTarget> Graphic<D> {
             let color_cache = self
                 .color_cache
                 .get_or_insert((foreground, background), || {
-                    ColorCache::new(foreground, background)
+                    ColorCache::new(foreground, background, &self.display)
                 });
 
             let content_info = ContentInfo {
@@ -117,8 +119,8 @@ impl<D: DrawTarget> Graphic<D> {
                 ($raster:ident) => {
                     for (y, lines) in $raster.iter().enumerate() {
                         for (x, &intensity) in lines.iter().enumerate() {
-                            let (r, g, b) = color_cache.0[intensity as usize];
-                            self.display.draw_pixel(x_start + x, y_start + y, (r, g, b));
+                            let pixel = color_cache.0[intensity as usize];
+                            self.display.draw_pixel(x_start + x, y_start + y, pixel);
                         }
                     }
                 };
@@ -131,28 +133,28 @@ impl<D: DrawTarget> Graphic<D> {
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
-                let (r, g, b) = color_cache.0[0xff];
+                let pixel = color_cache.0[0xff];
                 (0..font_height)
-                    .for_each(|y| self.display.draw_pixel(x_start, y_start + y, (r, g, b)));
+                    .for_each(|y| self.display.draw_pixel(x_start, y_start + y, pixel));
             }
 
             if cell
                 .flags
                 .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
             {
-                let (r, g, b) = color_cache.0[0xff];
+                let pixel = color_cache.0[0xff];
                 let y_base = y_start + font_height - 1;
                 (0..font_width)
-                    .for_each(|x| self.display.draw_pixel(x_start + x, y_base, (r, g, b)));
+                    .for_each(|x| self.display.draw_pixel(x_start + x, y_base, pixel));
             }
         }
     }
 }
 
-struct ColorCache([Rgb; 256]);
+struct ColorCache([u32; 256]);
 
 impl ColorCache {
-    fn new(foreground: Rgb, background: Rgb) -> Self {
+    fn new<D: DrawTarget>(foreground: Rgb, background: Rgb, display: &D) -> Self {
         let (r_diff, g_diff, b_diff) = (
             foreground.0 as i32 - background.0 as i32,
             foreground.1 as i32 - background.1 as i32,
@@ -161,11 +163,12 @@ impl ColorCache {
 
         let colors = core::array::from_fn(|intensity| {
             let weight = intensity as i32;
-            (
-                ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8,
-                ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8,
-                ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8,
-            )
+            
+            let r = ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            let g = ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
+            let b = ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
+
+            display.rgb_to_pixel((r, g, b))
         });
 
         Self(colors)

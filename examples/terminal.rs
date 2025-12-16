@@ -160,14 +160,19 @@ impl Default for Display {
 }
 
 impl DrawTarget for Display {
+    #[inline]
     fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
-    #[inline(always)]
-    fn draw_pixel(&mut self, x: usize, y: usize, color: Rgb) {
-        let color = (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
-        self.buffer[y * self.width + x].store(color, Ordering::Relaxed);
+    #[inline]
+    fn rgb_to_pixel(&self, rgb: Rgb) -> u32 {
+        (rgb.0 as u32) << 16 | (rgb.1 as u32) << 8 | rgb.2 as u32
+    }
+
+    #[inline]
+    fn draw_pixel(&mut self, x: usize, y: usize, pixel: u32) {
+        self.buffer[y * self.width + x].store(pixel, Ordering::Relaxed);
     }
 }
 
