@@ -11,8 +11,7 @@ use crate::font::{ContentInfo, FontManager, Rasterized};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
-    fn draw_pixel(&mut self, x: usize, y: usize, pixel: u32);
-    fn rgb_to_pixel(&self, rgb: Rgb) -> u32;
+    fn draw_pixel(&mut self, x: usize, y: usize, rgb: Rgb);
 }
 
 pub struct Graphic<D: DrawTarget> {
@@ -56,11 +55,10 @@ impl<D: DrawTarget> Graphic<D> {
     pub fn clear(&mut self, cell: Cell) {
         let (width, height) = self.display.size();
         let rgb = self.color_to_rgb(cell.background);
-        let pixel = self.display.rgb_to_pixel(rgb);
 
         for y in 0..height {
             for x in 0..width {
-                self.display.draw_pixel(x, y, pixel);
+                self.display.draw_pixel(x, y, rgb);
             }
         }
     }
@@ -105,7 +103,7 @@ impl<D: DrawTarget> Graphic<D> {
             let color_cache = self
                 .color_cache
                 .get_or_insert((foreground, background), || {
-                    ColorCache::new(foreground, background, &self.display)
+                    ColorCache::new(foreground, background)
                 });
 
             let content_info = ContentInfo {
@@ -115,62 +113,89 @@ impl<D: DrawTarget> Graphic<D> {
                 wide: cell.wide,
             };
 
-            macro_rules! draw_raster {
+            macro_rules! draw_gray_raster {
                 ($raster:ident) => {
-                    for (y, lines) in $raster.iter().enumerate() {
-                        for (x, &intensity) in lines.iter().enumerate() {
-                            let pixel = color_cache.0[intensity as usize];
-                            self.display.draw_pixel(x_start + x, y_start + y, pixel);
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, &alpha) in line_data.iter().enumerate() {
+                            let rgb = color_cache.to_rgb(alpha);
+                            self.display.draw_pixel(x_start + x, y_start + y, rgb);
+                        }
+                    }
+                };
+            }
+
+            macro_rules! draw_subpixel_raster {
+                ($raster:ident) => {
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, [r, g, b]) in line_data.iter().enumerate() {
+                            let rgb = color_cache.to_subpixel(*r, *g, *b);
+                            self.display.draw_pixel(x_start + x, y_start + y, rgb);
                         }
                     }
                 };
             }
 
             match font_manager.rasterize(content_info) {
-                Rasterized::Slice(raster) => draw_raster!(raster),
-                Rasterized::Vec(raster) => draw_raster!(raster),
-                Rasterized::Owned(raster) => draw_raster!(raster),
+                Rasterized::GraySlice(raster) => draw_gray_raster!(raster),
+                Rasterized::GrayVec(raster) => draw_gray_raster!(raster),
+                Rasterized::SubpixelVec(raster) => draw_subpixel_raster!(raster),
             }
 
             if cell.flags.contains(Flags::CURSOR_BEAM) {
-                let pixel = color_cache.0[0xff];
-                (0..font_height)
-                    .for_each(|y| self.display.draw_pixel(x_start, y_start + y, pixel));
+                let rgb = color_cache.to_rgb(255);
+                (0..font_height).for_each(|y| self.display.draw_pixel(x_start, y_start + y, rgb));
             }
 
             if cell
                 .flags
                 .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
             {
-                let pixel = color_cache.0[0xff];
+                let rgb = color_cache.to_rgb(255);
                 let y_base = y_start + font_height - 1;
-                (0..font_width)
-                    .for_each(|x| self.display.draw_pixel(x_start + x, y_base, pixel));
+                (0..font_width).for_each(|x| self.display.draw_pixel(x_start + x, y_base, rgb));
             }
         }
     }
 }
 
-struct ColorCache([u32; 256]);
+struct ColorCache {
+    r_lut: [u8; 256],
+    g_lut: [u8; 256],
+    b_lut: [u8; 256],
+}
 
 impl ColorCache {
-    fn new<D: DrawTarget>(foreground: Rgb, background: Rgb, display: &D) -> Self {
-        let (r_diff, g_diff, b_diff) = (
-            foreground.0 as i32 - background.0 as i32,
-            foreground.1 as i32 - background.1 as i32,
-            foreground.2 as i32 - background.2 as i32,
-        );
+    fn to_rgb(&self, alpha: u8) -> Rgb {
+        (
+            self.r_lut[alpha as usize],
+            self.g_lut[alpha as usize],
+            self.b_lut[alpha as usize],
+        )
+    }
 
-        let colors = core::array::from_fn(|intensity| {
-            let weight = intensity as i32;
-            
-            let r = ((background.0 as i32 + (r_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            let g = ((background.1 as i32 + (g_diff * weight / 0xff)).clamp(0, 255)) as u8;
-            let b = ((background.2 as i32 + (b_diff * weight / 0xff)).clamp(0, 255)) as u8;
+    fn to_subpixel(&self, red: u8, green: u8, blue: u8) -> Rgb {
+        (
+            self.r_lut[red as usize],
+            self.g_lut[green as usize],
+            self.b_lut[blue as usize],
+        )
+    }
 
-            display.rgb_to_pixel((r, g, b))
-        });
+    fn new(foreground: Rgb, background: Rgb) -> Self {
+        let gen_lut = |fg: u8, bg: u8| -> [u8; 256] {
+            let foreground = fg as i32;
+            let background = bg as i32;
+            let different = foreground - background;
 
-        Self(colors)
+            core::array::from_fn(|intensity| {
+                (background + different * intensity as i32 / 255) as u8
+            })
+        };
+
+        Self {
+            r_lut: gen_lut(foreground.0, background.0),
+            g_lut: gen_lut(foreground.1, background.1),
+            b_lut: gen_lut(foreground.2, background.2),
+        }
     }
 }

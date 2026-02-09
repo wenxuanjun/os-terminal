@@ -83,7 +83,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
             let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
-            terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
+            let font_manager = TrueTypeFont::new(10.0, font_buffer).with_subpixel(true);
+            terminal.set_font_manager(Box::new(font_manager));
             terminal.set_history_size(1000);
 
             let win_size = Winsize {
@@ -160,18 +161,12 @@ impl Default for Display {
 }
 
 impl DrawTarget for Display {
-    #[inline]
     fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
-    #[inline]
-    fn rgb_to_pixel(&self, rgb: Rgb) -> u32 {
-        (rgb.0 as u32) << 16 | (rgb.1 as u32) << 8 | rgb.2 as u32
-    }
-
-    #[inline]
-    fn draw_pixel(&mut self, x: usize, y: usize, pixel: u32) {
+    fn draw_pixel(&mut self, x: usize, y: usize, rgb: Rgb) {
+        let pixel = (rgb.0 as u32) << 16 | (rgb.1 as u32) << 8 | rgb.2 as u32;
         self.buffer[y * self.width + x].store(pixel, Ordering::Relaxed);
     }
 }

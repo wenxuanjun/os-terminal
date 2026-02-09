@@ -11,9 +11,9 @@ pub use bitmap::BitmapFont;
 pub use truetype::TrueTypeFont;
 
 pub enum Rasterized<'a> {
-    Slice(&'a [&'a [u8]]),
-    Vec(&'a Vec<Vec<u8>>),
-    Owned(Vec<Vec<u8>>),
+    GraySlice(&'a [&'a [u8]]),
+    GrayVec(&'a Vec<Vec<u8>>),
+    SubpixelVec(&'a Vec<Vec<[u8; 3]>>),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Hash)]

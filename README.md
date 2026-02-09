@@ -34,7 +34,7 @@ use os_terminal::font::BitmapFont;
 struct Display {
     width: usize,
     height: usize,
-    buffer: &'static [u32],
+    buffer: &'static mut [u32],
 }
 
 impl DrawTarget for Display {
@@ -100,14 +100,18 @@ let font_buffer = include_bytes!("SourceCodeVF.otf");
 terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
 ```
 
-Notice that you are supposed to use a variable-font-supported ttf file otherwise font weight will not change.
+If the font is a variable font, it uses the `wght` axis. If not, the library automatically synthesizes bold glyphs by thickening the outline. And you can optionally provide a separate italic font file. If not provided, the library automatically synthesizes italics by skewing the glyphs. You can enable subpixel rendering to improve text clarity on LCD screens.
 
-Italic font support is also optional. If not provided, it will be rendered with default Roman font.
+This means you can use a single standard `.ttf` file and still get Bold, Italic, and Bold-Italic styles, saving valuable flash storage.
 
 ```rust
-let font_buffer = include_bytes!("SourceCodeVF.otf");
-let italic_buffer = include_bytes!("SourceCodeVF-Italic.otf");
-let font_manager = TrueTypeFont::new(10.0, font_buffer).with_italic_font(italic_buffer);
+let font_buffer = include_bytes!("FiraCode.ttf");
+// Optional: Use real italic font
+let italic_buffer = include_bytes!("FiraCode-Italic.ttf"); 
+
+let font_manager = TrueTypeFont::new(10.0, font_buffer)
+    .with_italic_font(italic_buffer)
+    .with_subpixel(true);
 terminal.set_font_manager(Box::new(font_manager));
 ```
 
@@ -116,7 +120,7 @@ terminal.set_font_manager(Box::new(font_manager));
 If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
 ```rust
-os_terminal::set_logger(|args| println!("Terminal: {:?}", args));
+terminal.set_logger(|args| println!("Terminal: {:?}", args));
 ```
 
 ### Flush
@@ -146,9 +150,45 @@ terminal.set_custom_color_scheme(palette);
 
 Note that your setting is temporary because your palette will be overwritten if you switch to another theme.
 
+### Clipboard
+
+To enable clipboard support (Copy/Paste), you need to implement the `ClipboardHandler` trait and register it.
+
+```rust
+struct Clipboard;
+
+impl ClipboardHandler for Clipboard {
+    fn get_text(&mut self) -> Option<String> {
+        // Return text from system clipboard
+        Some("paste text".to_string())
+    }
+
+    fn set_text(&mut self, text: String) {
+        // Set text to system clipboard
+    }
+}
+
+terminal.set_clipboard(Box::new(Clipboard));
+```
+
+Once configured, the following shortcuts are enabled:
+- `Ctrl + Shift + C`: Copy selected text (or logic defined by you)
+- `Ctrl + Shift + V`: Paste text
+
 ### Miscellaneous
 
 Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
+
+And color cache size and `TrueTypeFont` rasterize cache size is also configurable.
+
+```rust
+// Set the size of the color cache (default: 128)
+terminal.set_color_cache_size(4096);
+
+// Set the size of the font raster cache (default: 512)
+// Only available when using TrueTypeFont
+let font = TrueTypeFont::new(10.0, font_buffer).with_cache_size(1024);
+```
 
 Moreover, you can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
 
@@ -161,6 +201,8 @@ With `handle_keyboard`, some shortcuts are supported:
 - `Ctrl + Shift + F1-F8`: Switch to different built-in themes
 - `Ctrl + Shift + ArrowUp/ArrowDown`: Scroll up/down history
 - `Ctrl + Shift + PageUp/PageDown`: Scroll up/down history by page
+- `Ctrl + Shift + C`: Copy (Requires `ClipboardHandler`)
+- `Ctrl + Shift + V`: Paste (Requires `ClipboardHandler`)
 
 ## Features
 
