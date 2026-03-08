@@ -10,7 +10,8 @@ pub enum KeyboardEvent {
     AnsiString(String),
     Copy,
     Paste,
-    SetColorScheme(usize),
+    FontSize(isize),
+    ColorScheme(usize),
     Scroll { up: bool, page: bool },
 }
 
@@ -64,6 +65,18 @@ impl KeyboardManager {
             }
         }
 
+        if modifiers.is_ctrl() {
+            match key {
+                DecodedKey::Unicode('-') => {
+                    return KeyboardEvent::FontSize(-1);
+                }
+                DecodedKey::Unicode('=') => {
+                    return KeyboardEvent::FontSize(1);
+                }
+                _ => {}
+            }
+        }
+
         match key {
             DecodedKey::RawKey(k) => self
                 .generate_ansi_sequence(k)
@@ -90,7 +103,7 @@ impl KeyboardManager {
             F8 => Some(7),
             _ => None,
         } {
-            return Some(KeyboardEvent::SetColorScheme(index));
+            return Some(KeyboardEvent::ColorScheme(index));
         }
 
         match key {

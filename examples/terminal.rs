@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::ffi::CString;
 use std::num::NonZeroU32;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, IntoRawFd};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -17,18 +17,20 @@ use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::unistd::{close, execvp, fork, read, write, ForkResult};
 use nix::unistd::{dup2_stderr, dup2_stdin, dup2_stdout, setsid};
 use os_terminal::font::TrueTypeFont;
+use os_terminal::KeyboardEvent;
 use os_terminal::{ClipboardHandler, DrawTarget, MouseInput, Rgb, Terminal};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, Ime, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
 const TOUCHPAD_SCROLL_MULTIPLIER: f32 = 0.25;
+const FONT_DATA: &[u8] = include_bytes!("FiraCodeNotoSans.ttf");
 
 struct Clipboard(arboard::Clipboard);
 
@@ -65,79 +67,70 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Ok(ForkResult::Parent { .. }) => {
             close(slave.into_raw_fd())?;
-
-            let display = Display::default();
-            let buffer = display.buffer.clone();
-            let (ansi_sender, ansi_receiver) = channel();
-
-            let mut terminal = Terminal::new(display);
-            terminal.set_auto_flush(false);
-            terminal.set_scroll_speed(5);
-            terminal.set_logger(|args| println!("Terminal: {:?}", args));
-            terminal.set_clipboard(Box::new(Clipboard::new()));
-            terminal.set_color_cache_size(4096);
-
-            terminal.set_pty_writer({
-                let ansi_sender = ansi_sender.clone();
-                Box::new(move |data| ansi_sender.send(data.to_string()).unwrap())
-            });
-
-            let font_buffer = include_bytes!("FiraCodeNotoSans.ttf");
-            let font_manager = TrueTypeFont::new(10.0, font_buffer).with_subpixel(true);
-            terminal.set_font_manager(Box::new(font_manager));
-            terminal.set_history_size(1000);
-
-            let win_size = Winsize {
-                ws_row: terminal.rows() as u16,
-                ws_col: terminal.columns() as u16,
-                ws_xpixel: DISPLAY_SIZE.0 as u16,
-                ws_ypixel: DISPLAY_SIZE.1 as u16,
-            };
-
-            unsafe { ioctl(master.as_raw_fd(), TIOCSWINSZ, &win_size) };
-
-            let event_loop = EventLoop::new()?;
-            let terminal = Arc::new(Mutex::new(terminal));
-            let pending_draw = Arc::new(AtomicBool::new(false));
-
-            let mut app = App::new(
-                ansi_sender,
-                buffer.clone(),
-                terminal.clone(),
-                pending_draw.clone(),
-            );
-
-            let master_clone = master.try_clone()?;
-            std::thread::spawn(move || {
-                let mut temp = [0u8; 4096];
-                loop {
-                    match read(master_clone.as_fd(), &mut temp) {
-                        Ok(n) if n > 0 => {
-                            terminal.lock().unwrap().process(&temp[..n]);
-                            pending_draw.store(true, Ordering::Relaxed);
-                        }
-                        Ok(_) => break,
-                        Err(Errno::EIO) => process::exit(0),
-                        Err(e) => {
-                            eprintln!("Error reading from PTY: {:?}", e);
-                            process::exit(1)
-                        }
-                    }
-                }
-            });
-
-            std::thread::spawn(move || {
-                while let Ok(key) = ansi_receiver.recv() {
-                    write(master.as_fd(), key.as_bytes()).unwrap();
-                }
-            });
-
-            event_loop.run_app(&mut app)?;
+            run_app(master)?;
         }
         Err(_) => eprintln!("Fork failed"),
     }
 
     Ok(())
+}
+
+fn run_app(master: OwnedFd) -> Result<(), Box<dyn Error>> {
+    let display = Display::default();
+    let buffer = display.buffer.clone();
+    let (ansi_sender, ansi_receiver) = channel();
+
+    let mut terminal = Terminal::new(display);
+    terminal.set_auto_flush(false);
+    terminal.set_scroll_speed(5);
+    terminal.set_logger(|args| println!("Terminal: {:?}", args));
+    terminal.set_clipboard(Box::new(Clipboard::new()));
+    terminal.set_history_size(1000);
+    terminal.set_color_cache_size(4096);
+
+    terminal.set_pty_writer({
+        let ansi_sender = ansi_sender.clone();
+        Box::new(move |data| ansi_sender.send(data.to_string()).unwrap())
+    });
+
+    let event_loop = EventLoop::new()?;
+    let terminal = Arc::new(Mutex::new(terminal));
+    let pending_draw = Arc::new(AtomicBool::new(false));
+
+    let mut app = App::new(
+        ansi_sender,
+        buffer.clone(),
+        terminal.clone(),
+        pending_draw.clone(),
+        master.as_raw_fd(),
+    );
+
+    let master_clone = master.try_clone()?;
+    std::thread::spawn(move || {
+        let mut temp = [0u8; 4096];
+        loop {
+            match read(master_clone.as_fd(), &mut temp) {
+                Ok(n) if n > 0 => {
+                    terminal.lock().unwrap().process(&temp[..n]);
+                    pending_draw.store(true, Ordering::Relaxed);
+                }
+                Ok(_) => break,
+                Err(Errno::EIO) => process::exit(0),
+                Err(e) => {
+                    eprintln!("Error reading from PTY: {:?}", e);
+                    process::exit(1)
+                }
+            }
+        }
+    });
+
+    std::thread::spawn(move || {
+        while let Ok(key) = ansi_receiver.recv() {
+            write(master.as_fd(), key.as_bytes()).unwrap();
+        }
+    });
+
+    Ok(event_loop.run_app(&mut app)?)
 }
 
 struct Display {
@@ -171,14 +164,46 @@ impl DrawTarget for Display {
     }
 }
 
+struct PtyController {
+    fd: i32,
+    rows: u16,
+    cols: u16,
+}
+
+impl PtyController {
+    fn new(fd: i32) -> Self {
+        Self {
+            fd,
+            rows: 0,
+            cols: 0,
+        }
+    }
+
+    fn resize(&mut self, rows: usize, cols: usize) {
+        if rows as u16 != self.rows || cols as u16 != self.cols {
+            self.rows = rows as u16;
+            self.cols = cols as u16;
+            let win_size = Winsize {
+                ws_row: self.rows,
+                ws_col: self.cols,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            };
+            unsafe { ioctl(self.fd, TIOCSWINSZ, &win_size) };
+        }
+    }
+}
+
 struct App {
     ansi_sender: Sender<String>,
     buffer: Arc<Vec<AtomicU32>>,
     terminal: Arc<Mutex<Terminal<Display>>>,
+    pty: PtyController,
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
     pending_draw: Arc<AtomicBool>,
     scroll_accumulator: f32,
+    font_size: f32,
 }
 
 impl App {
@@ -187,15 +212,85 @@ impl App {
         buffer: Arc<Vec<AtomicU32>>,
         terminal: Arc<Mutex<Terminal<Display>>>,
         pending_draw: Arc<AtomicBool>,
+        master_fd: i32,
     ) -> Self {
-        Self {
+        let mut app = Self {
             ansi_sender,
             buffer,
             terminal,
+            pty: PtyController::new(master_fd),
             window: None,
             surface: None,
             pending_draw,
             scroll_accumulator: 0.0,
+            font_size: 10.0,
+        };
+
+        let mut terminal = app.terminal.lock().unwrap();
+        app.apply_font_change(&mut terminal);
+        app.pty.resize(terminal.rows(), terminal.columns());
+        drop(terminal);
+
+        app
+    }
+
+    fn apply_font_change(&self, term: &mut Terminal<Display>) {
+        let font = TrueTypeFont::new(self.font_size, FONT_DATA);
+        term.set_font_manager(Box::new(font.with_subpixel(true)));
+    }
+
+    fn handle_key_event(&mut self, event: KeyEvent) {
+        let Some(evdev_code) = event.physical_key.to_scancode() else {
+            return;
+        };
+
+        let keymap = KeyMapping::Evdev(evdev_code as u16);
+        let Ok(keymap) = KeyMap::from_key_mapping(keymap) else {
+            return;
+        };
+
+        let mut scancode = keymap.win;
+        if event.state == ElementState::Released {
+            scancode += 0x80;
+        }
+
+        let mut term = self.terminal.lock().unwrap();
+        if scancode >= 0xe000 {
+            term.handle_keyboard(0xe0);
+            scancode -= 0xe000;
+        }
+
+        let unhandled_event = term.handle_keyboard(scancode as u8);
+        if let Some(KeyboardEvent::FontSize(delta)) = unhandled_event {
+            let new_size = (self.font_size + delta as f32).clamp(4.0, 72.0);
+
+            if (new_size - self.font_size).abs() > f32::EPSILON {
+                self.font_size = new_size;
+                self.apply_font_change(&mut term);
+            }
+        }
+
+        let (rows, cols) = (term.rows(), term.columns());
+        drop(term);
+        self.pty.resize(rows, cols);
+        self.pending_draw.store(true, Ordering::Relaxed);
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        self.scroll_accumulator += match delta {
+            MouseScrollDelta::LineDelta(_, lines) => lines,
+            MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * TOUCHPAD_SCROLL_MULTIPLIER,
+        };
+        if self.scroll_accumulator.abs() >= 1.0 {
+            let lines = self.scroll_accumulator as isize;
+            self.scroll_accumulator -= lines as f32;
+
+            self.terminal
+                .lock()
+                .unwrap()
+                .handle_mouse(MouseInput::Scroll(lines));
+
+            self.pending_draw.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -257,51 +352,12 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Ime(Ime::Commit(text)) => {
                 self.ansi_sender.send(text).unwrap();
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                self.scroll_accumulator += match delta {
-                    MouseScrollDelta::LineDelta(_, lines) => lines,
-                    MouseScrollDelta::PixelDelta(delta) => {
-                        delta.y as f32 * TOUCHPAD_SCROLL_MULTIPLIER
-                    }
-                };
-                if self.scroll_accumulator.abs() >= 1.0 {
-                    let lines = self.scroll_accumulator as isize;
-                    self.scroll_accumulator -= lines as f32;
-                    self.terminal
-                        .lock()
-                        .unwrap()
-                        .handle_mouse(MouseInput::Scroll(lines));
-                    self.pending_draw.store(true, Ordering::Relaxed);
-                }
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(evdev_code) = event.physical_key.to_scancode() {
-                    if let Ok(keymap) =
-                        KeyMap::from_key_mapping(KeyMapping::Evdev(evdev_code as u16))
-                    {
-                        // Windows scancode is 16-bit extended scancode
-                        let mut scancode = keymap.win;
-                        if event.state == ElementState::Released {
-                            scancode += 0x80;
-                        }
-                        if scancode >= 0xe000 {
-                            self.terminal.lock().unwrap().handle_keyboard(0xe0);
-                            scancode -= 0xe000;
-                        }
-                        self.terminal
-                            .lock()
-                            .unwrap()
-                            .handle_keyboard(scancode as u8);
-                        self.pending_draw.store(true, Ordering::Relaxed);
-                    }
-                }
-            }
+            WindowEvent::KeyboardInput { event, .. } => self.handle_key_event(event),
+            WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
             _ => {}
         }
     }

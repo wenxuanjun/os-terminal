@@ -32,7 +32,7 @@ pub type BellHandler = Box<dyn FnMut() + Send>;
 pub type Clipboard = Box<dyn ClipboardHandler + Send>;
 
 #[derive(Default)]
-pub struct DummySyncHandler;
+struct DummySyncHandler;
 
 #[rustfmt::skip]
 impl Timeout for DummySyncHandler {
@@ -42,7 +42,7 @@ impl Timeout for DummySyncHandler {
 }
 
 bitflags::bitflags! {
-    pub struct TerminalMode: u32 {
+    struct TerminalMode: u32 {
         const SHOW_CURSOR = 1 << 0;
         const APP_CURSOR = 1 << 1;
         const APP_KEYPAD = 1 << 2;
@@ -84,7 +84,7 @@ pub struct Terminal<D: DrawTarget> {
     inner: TerminalInner<D>,
 }
 
-pub struct TerminalInner<D: DrawTarget> {
+struct TerminalInner<D: DrawTarget> {
     graphic: Graphic<D>,
     cursor: Cursor,
     saved_cursor: Cursor,
@@ -156,35 +156,36 @@ impl<D: DrawTarget> Terminal<D> {
 }
 
 impl<D: DrawTarget> Terminal<D> {
-    pub fn handle_keyboard(&mut self, scancode: u8) {
+    pub fn handle_keyboard(&mut self, scancode: u8) -> Option<KeyboardEvent> {
         match self.inner.keyboard.handle_keyboard(scancode) {
-            KeyboardEvent::SetColorScheme(index) => {
+            KeyboardEvent::ColorScheme(index) => {
                 self.set_color_scheme(index);
+                None
             }
             KeyboardEvent::Scroll { up, page } => {
                 let lines = if page { self.rows() } else { 1 } as isize;
                 self.inner.scroll_history(if up { -lines } else { lines });
+                None
             }
             KeyboardEvent::AnsiString(s) => {
                 self.inner.buffer.ensure_latest();
                 self.inner.pty_write(&s);
+                None
             }
             KeyboardEvent::Paste => {
-                let Some(clipboard) = self.inner.clipboard.as_mut() else {
-                    return;
-                };
-
-                let Some(text) = clipboard.get_text() else {
-                    return;
-                };
+                let clipboard = self.inner.clipboard.as_mut()?;
+                let text = clipboard.get_text()?;
 
                 if self.inner.mode.contains(TerminalMode::BRACKETED_PASTE) {
-                    self.inner.pty_write(&format!("\x1b[200~{text}\x1b[201~"));
+                    let content = &format!("\x1b[200~{text}\x1b[201~");
+                    self.inner.pty_write(content);
                 } else {
                     self.inner.pty_write(&text);
                 }
+
+                None
             }
-            _ => {}
+            event => Some(event),
         }
     }
 
@@ -251,14 +252,6 @@ impl<D: DrawTarget> Terminal<D> {
         self.inner.graphic.set_cache_size(size);
     }
 
-    pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
-        self.inner
-            .buffer
-            .update_size(font_manager.size(), self.inner.graphic.size());
-        self.inner.scroll_region = 0..self.inner.buffer.height() - 1;
-        self.inner.graphic.font_manager = Some(font_manager);
-    }
-
     pub fn set_color_scheme(&mut self, palette_index: usize) {
         self.inner.graphic.color_scheme = ColorScheme::new(palette_index);
         self.inner.attribute_template = Cell::default();
@@ -268,6 +261,49 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_custom_color_scheme(&mut self, palette: &Palette) {
         self.inner.graphic.color_scheme = ColorScheme::from(palette);
         self.inner.attribute_template = Cell::default();
+        self.inner.buffer.full_flush(&mut self.inner.graphic);
+    }
+
+    pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
+        let show_cursor = self.inner.mode.contains(TerminalMode::SHOW_CURSOR);
+        if show_cursor {
+            self.inner.cursor_handler(false);
+        }
+
+        let display_cursor = self.inner.cursor;
+        let mut cursors = [
+            (display_cursor.row, display_cursor.column),
+            (self.inner.saved_cursor.row, self.inner.saved_cursor.column),
+        ];
+
+        self.inner
+            .buffer
+            .update_size(font_manager.size(), self.inner.graphic.size(), &mut cursors);
+
+        let max_row = self.inner.buffer.height().saturating_sub(1);
+        let max_col = self.inner.buffer.width().saturating_sub(1);
+
+        if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
+            self.inner.cursor.row = min(display_cursor.row, max_row);
+            self.inner.cursor.column = min(display_cursor.column, max_col);
+        } else {
+            self.inner.cursor.row = min(cursors[0].0, max_row);
+            self.inner.cursor.column = min(cursors[0].1, max_col);
+        }
+
+        self.inner.saved_cursor.row = cursors[1].0;
+        self.inner.saved_cursor.column = cursors[1].1;
+
+        self.inner.alt_cursor.row = min(self.inner.alt_cursor.row, max_row);
+        self.inner.alt_cursor.column = min(self.inner.alt_cursor.column, max_col);
+
+        self.inner.scroll_region = 0..max_row;
+        self.inner.graphic.font_manager = Some(font_manager);
+
+        if show_cursor {
+            self.inner.cursor_handler(true);
+        }
+
         self.inner.buffer.full_flush(&mut self.inner.graphic);
     }
 }
@@ -361,6 +397,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             if !self.mode.contains(TerminalMode::LINE_WRAP) {
                 return;
             }
+            self.buffer.set_wrap(self.cursor.row, true);
             self.linefeed();
             self.carriage_return();
         }

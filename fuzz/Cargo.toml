@@ -14,7 +14,11 @@ test = false
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = "0.4.12"
+
+[dependencies.arbitrary]
+version = "1.4.2"
+features = ["derive"]
 
 [dependencies.os-terminal]
 path = ".."

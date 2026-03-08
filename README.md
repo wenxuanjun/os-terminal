@@ -66,12 +66,19 @@ The keyboard, mouse, and some ansi sequences (such as report device status ) gen
 
 Now you can redirect the keyboard events to the terminal in scancode format (currently only Scan Code Set1 and North American standard English keyboard layout are supported) to let the terminal process shortcuts or pass escaped strings to your `PtyWriter`.
 
+`handle_keyboard` returns `Option<KeyboardEvent>` for events that need to be handled by the caller, such as font size changes:
+
 ```rust
+use os_terminal::KeyboardEvent;
+
 // LCtrl pressed, C pressed, C released, LCtrl released
 let scancodes = [0x1d, 0x2e, 0xae, 0x9d];
 
 for scancode in scancodes.iter() {
-    terminal.handle_keyboard(*scancode);
+    let event = terminal.handle_keyboard(*scancode);
+    if let Some(KeyboardEvent::FontSize(delta)) = event {
+        // Resize font and call terminal.set_font_manager(...)
+    }
 }
 ```
 
@@ -198,6 +205,7 @@ In a bare-metal environment (e.g. your toy OS), you may wish to have all input `
 
 With `handle_keyboard`, some shortcuts are supported:
 
+- `Ctrl + =/-`: Font size increase/decrease (returns `KeyboardEvent::FontSize`)
 - `Ctrl + Shift + F1-F8`: Switch to different built-in themes
 - `Ctrl + Shift + ArrowUp/ArrowDown`: Scroll up/down history
 - `Ctrl + Shift + PageUp/PageDown`: Scroll up/down history by page
