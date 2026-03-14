@@ -1,9 +1,10 @@
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 use lru::LruCache;
 use swash::scale::{image::Content, Render, ScaleContext, Source};
 use swash::zeno::{Angle, Format, Transform};
-use swash::FontRef;
+use swash::{CacheKey, FontRef};
 
 use super::{ContentInfo, FontManager, Rasterized};
 
@@ -12,9 +13,44 @@ pub enum RasterBuffer {
     Subpixel(Vec<Vec<[u8; 3]>>),
 }
 
+struct FontData {
+    bytes: Cow<'static, [u8]>,
+    offset: u32,
+    key: CacheKey,
+}
+
+impl FontData {
+    fn as_ref(&self) -> FontRef<'_> {
+        FontRef {
+            data: &self.bytes,
+            offset: self.offset,
+            key: self.key,
+        }
+    }
+
+    fn from_bytes(font_bytes: &'static [u8]) -> Self {
+        #[cfg(feature = "woff2")]
+        let bytes = {
+            let mut buffer = font_bytes;
+            woff2::convert_woff2_to_ttf(&mut buffer)
+                .map(Cow::Owned)
+                .unwrap_or(Cow::Borrowed(font_bytes))
+        };
+
+        #[cfg(not(feature = "woff2"))]
+        let bytes = Cow::Borrowed(font_bytes);
+
+        let font = FontRef::from_index(&bytes, 0)
+            .expect("invalid font data, or enable `woff2` for WOFF2 fonts");
+
+        let (offset, key) = (font.offset, font.key);
+        Self { bytes, offset, key }
+    }
+}
+
 pub struct TrueTypeFont {
-    font: FontRef<'static>,
-    italic_font: Option<FontRef<'static>>,
+    font: FontData,
+    italic_font: Option<FontData>,
     subpixel: bool,
     scale_context: ScaleContext,
     raster_height: usize,
@@ -26,9 +62,9 @@ pub struct TrueTypeFont {
 
 impl TrueTypeFont {
     pub fn new(font_size: f32, font_bytes: &'static [u8]) -> Self {
-        let font = FontRef::from_index(font_bytes, 0).unwrap();
+        let font = FontData::from_bytes(font_bytes);
         let font_size = font_size * 96.0 / 72.0;
-        let metrics = font.metrics(&[]).scale(font_size);
+        let metrics = font.as_ref().metrics(&[]).scale(font_size);
         let line_height = metrics.ascent + metrics.descent + metrics.leading;
 
         Self {
@@ -56,7 +92,7 @@ impl TrueTypeFont {
     }
 
     pub fn with_italic_font(mut self, italic_font: &'static [u8]) -> Self {
-        self.italic_font = Some(FontRef::from_index(italic_font, 0).unwrap());
+        self.italic_font = Some(FontData::from_bytes(italic_font));
         self
     }
 }
@@ -72,8 +108,8 @@ impl FontManager for TrueTypeFont {
                 .italic_font
                 .as_ref()
                 .filter(|_| info.italic)
-                .map(|f| (f, false))
-                .unwrap_or((&self.font, info.italic));
+                .map(|font| (font.as_ref(), false))
+                .unwrap_or((self.font.as_ref(), info.italic));
 
             let weight_tag = u32::from_be_bytes(*b"wght");
             let has_weight_axis = select_font.variations().any(|v| v.tag() == weight_tag);
@@ -81,7 +117,7 @@ impl FontManager for TrueTypeFont {
 
             let mut scaler = self
                 .scale_context
-                .builder(*select_font)
+                .builder(select_font)
                 .size(self.font_size)
                 .variations(&[("wght", font_weight)])
                 .hint(true)

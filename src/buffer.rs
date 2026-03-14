@@ -202,10 +202,7 @@ impl TerminalBuffer {
         }
 
         let cursor_count = active_cursors.len();
-        let mut tracked = active_cursors
-            .iter()
-            .copied()
-            .collect::<Vec<(usize, usize)>>();
+        let mut tracked = active_cursors.to_vec();
         tracked.push((self.start_row, 0));
 
         let mut reflow_ctx = ReflowContext::new(width, &mut tracked);

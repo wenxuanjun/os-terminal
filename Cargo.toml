@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -26,6 +26,7 @@ codegen-units = 1
 default = ["bitmap"]
 bitmap = ["dep:noto-sans-mono-bitmap"]
 truetype = ["dep:swash"]
+woff2 = ["dep:woff2"]
 
 [dependencies]
 bitflags = "2.11.0"
@@ -47,6 +48,11 @@ version = "0.2.6"
 default-features = false
 optional = true
 features = ["render", "libm"]
+
+[dependencies.woff2]
+package = "woff2-no-std"
+version = "0.3.3"
+optional = true
 
 [dependencies.noto-sans-mono-bitmap]
 version = "0.3.2"

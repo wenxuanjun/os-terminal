@@ -30,7 +30,7 @@ use winit::window::{ImePurpose, Window, WindowAttributes, WindowId};
 
 const DISPLAY_SIZE: (usize, usize) = (1024, 768);
 const TOUCHPAD_SCROLL_MULTIPLIER: f32 = 0.25;
-const FONT_DATA: &[u8] = include_bytes!("FiraCodeNotoSans.ttf");
+const FONT_DATA: &[u8] = include_bytes!("FiraCodeNotoSans.woff2");
 
 struct Clipboard(arboard::Clipboard);
 
