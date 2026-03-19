@@ -80,7 +80,10 @@ fn run_app(master: OwnedFd) -> Result<(), Box<dyn Error>> {
     let buffer = display.buffer.clone();
     let (ansi_sender, ansi_receiver) = channel();
 
-    let mut terminal = Terminal::new(display);
+    let mut terminal = Terminal::new(
+        display,
+        Box::new(TrueTypeFont::new(10.0, FONT_DATA).with_subpixel(true)),
+    );
     terminal.set_auto_flush(false);
     terminal.set_scroll_speed(5);
     terminal.set_logger(|args| println!("Terminal: {:?}", args));
@@ -226,8 +229,7 @@ impl App {
             font_size: 10.0,
         };
 
-        let mut terminal = app.terminal.lock().unwrap();
-        app.apply_font_change(&mut terminal);
+        let terminal = app.terminal.lock().unwrap();
         app.pty.resize(terminal.rows(), terminal.columns());
         drop(terminal);
 

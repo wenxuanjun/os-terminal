@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use core::mem::swap;
-use core::ops::Range;
+use core::ops::RangeInclusive;
 use core::time::Duration;
 use core::{cmp::min, fmt};
 
@@ -99,38 +99,40 @@ struct TerminalInner<D: DrawTarget> {
     pty_writer: Option<PtyWriter>,
     bell_handler: Option<BellHandler>,
     clipboard: Option<Clipboard>,
-    scroll_region: Range<usize>,
+    scroll_region: RangeInclusive<usize>,
     charsets: [StandardCharset; 4],
     active_charset: CharsetIndex,
 }
 
 impl<D: DrawTarget> Terminal<D> {
-    pub fn new(display: D) -> Self {
-        let mut graphic = Graphic::new(display);
-        graphic.clear(Cell::default());
+    pub fn new(display: D, font_manager: Box<dyn FontManager>) -> Self {
+        let font_size = font_manager.size();
+        let graphic = Graphic::new(display, font_manager);
+        let buffer = TerminalBuffer::new(font_size, graphic.size());
 
-        Self {
-            performer: Processor::new(),
-            inner: TerminalInner {
-                graphic,
-                cursor: Cursor::default(),
-                saved_cursor: Cursor::default(),
-                alt_cursor: Cursor::default(),
-                mode: TerminalMode::default(),
-                attribute_template: Cell::default(),
-                buffer: TerminalBuffer::default(),
-                keyboard: KeyboardManager::default(),
-                mouse: MouseManager::default(),
-                auto_flush: true,
-                pty_writer: None,
-                logger: None,
-                bell_handler: None,
-                clipboard: None,
-                scroll_region: Range::default(),
-                charsets: Default::default(),
-                active_charset: CharsetIndex::default(),
-            },
-        }
+        let mut inner = TerminalInner {
+            graphic,
+            cursor: Cursor::default(),
+            saved_cursor: Cursor::default(),
+            alt_cursor: Cursor::default(),
+            mode: TerminalMode::default(),
+            attribute_template: Cell::default(),
+            buffer,
+            keyboard: KeyboardManager::default(),
+            mouse: MouseManager::default(),
+            auto_flush: true,
+            pty_writer: None,
+            logger: None,
+            bell_handler: None,
+            clipboard: None,
+            scroll_region: 0..=0,
+            charsets: Default::default(),
+            active_charset: CharsetIndex::default(),
+        };
+        inner.apply_layout_change();
+
+        let performer = Processor::new();
+        Self { performer, inner }
     }
 
     pub fn rows(&self) -> usize {
@@ -265,46 +267,8 @@ impl<D: DrawTarget> Terminal<D> {
     }
 
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
-        let show_cursor = self.inner.mode.contains(TerminalMode::SHOW_CURSOR);
-        if show_cursor {
-            self.inner.cursor_handler(false);
-        }
-
-        let display_cursor = self.inner.cursor;
-        let mut cursors = [
-            (display_cursor.row, display_cursor.column),
-            (self.inner.saved_cursor.row, self.inner.saved_cursor.column),
-        ];
-
-        self.inner
-            .buffer
-            .update_size(font_manager.size(), self.inner.graphic.size(), &mut cursors);
-
-        let max_row = self.inner.buffer.height().saturating_sub(1);
-        let max_col = self.inner.buffer.width().saturating_sub(1);
-
-        if !self.inner.mode.contains(TerminalMode::ALT_SCREEN) {
-            self.inner.cursor.row = min(display_cursor.row, max_row);
-            self.inner.cursor.column = min(display_cursor.column, max_col);
-        } else {
-            self.inner.cursor.row = min(cursors[0].0, max_row);
-            self.inner.cursor.column = min(cursors[0].1, max_col);
-        }
-
-        self.inner.saved_cursor.row = cursors[1].0;
-        self.inner.saved_cursor.column = cursors[1].1;
-
-        self.inner.alt_cursor.row = min(self.inner.alt_cursor.row, max_row);
-        self.inner.alt_cursor.column = min(self.inner.alt_cursor.column, max_col);
-
-        self.inner.scroll_region = 0..max_row;
-        self.inner.graphic.font_manager = Some(font_manager);
-
-        if show_cursor {
-            self.inner.cursor_handler(true);
-        }
-
-        self.inner.buffer.full_flush(&mut self.inner.graphic);
+        self.inner.graphic.font_manager = font_manager;
+        self.inner.apply_layout_change();
     }
 }
 
@@ -312,6 +276,52 @@ impl<D: DrawTarget> fmt::Write for Terminal<D> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.process(s.as_bytes());
         Ok(())
+    }
+}
+
+impl<D: DrawTarget> TerminalInner<D> {
+    fn apply_layout_change(&mut self) {
+        let show_cursor = self.mode.contains(TerminalMode::SHOW_CURSOR);
+        if show_cursor {
+            self.cursor_handler(false);
+        }
+
+        let display_cursor = self.cursor;
+        let mut cursors = [
+            (display_cursor.row, display_cursor.column),
+            (self.saved_cursor.row, self.saved_cursor.column),
+        ];
+
+        self.buffer.update_size(
+            self.graphic.font_manager.size(),
+            self.graphic.size(),
+            &mut cursors,
+        );
+
+        let max_row = self.buffer.height() - 1;
+        let max_col = self.buffer.width() - 1;
+
+        if !self.mode.contains(TerminalMode::ALT_SCREEN) {
+            self.cursor.row = min(display_cursor.row, max_row);
+            self.cursor.column = min(display_cursor.column, max_col);
+        } else {
+            self.cursor.row = min(cursors[0].0, max_row);
+            self.cursor.column = min(cursors[0].1, max_col);
+        }
+
+        self.saved_cursor.row = cursors[1].0;
+        self.saved_cursor.column = cursors[1].1;
+
+        self.alt_cursor.row = min(self.alt_cursor.row, max_row);
+        self.alt_cursor.column = min(self.alt_cursor.column, max_col);
+
+        self.scroll_region = 0..=max_row;
+
+        if show_cursor {
+            self.cursor_handler(true);
+        }
+
+        self.buffer.full_flush(&mut self.graphic);
     }
 }
 
@@ -550,7 +560,7 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             self.carriage_return();
         }
 
-        if self.cursor.row == self.scroll_region.end {
+        if self.cursor.row == *self.scroll_region.end() {
             self.scroll_up(1);
         } else if self.cursor.row < self.buffer.height() - 1 {
             self.cursor.row += 1;
@@ -728,11 +738,12 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
         self.buffer.clear_history();
         self.mode = TerminalMode::default();
         self.attribute_template = Cell::default();
+        self.scroll_region = 0..=(self.buffer.height() - 1);
     }
 
     fn reverse_index(&mut self) {
         log!(self, "Reverse index");
-        if self.cursor.row == self.scroll_region.start {
+        if self.cursor.row == *self.scroll_region.start() {
             self.scroll_down(1);
         } else {
             self.cursor.row = self.cursor.row.saturating_sub(1);
@@ -863,8 +874,9 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
             return;
         }
 
-        self.scroll_region.start = min(top, self.buffer.height()) - 1;
-        self.scroll_region.end = min(bottom, self.buffer.height()) - 1;
+        let top = min(top, self.buffer.height()) - 1;
+        let bottom = min(bottom, self.buffer.height()) - 1;
+        self.scroll_region = top..=bottom;
         self.goto(0, 0);
     }
 

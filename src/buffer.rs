@@ -1,12 +1,11 @@
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use core::mem::swap;
-use core::ops::Range;
+use core::ops::RangeInclusive;
 
 use crate::cell::Cell;
 use crate::graphic::{DrawTarget, Graphic};
 
-const INIT_SIZE: Size = (1, 1);
 const DEFAULT_HISTORY_SIZE: usize = 200;
 
 type Size = (usize, usize);
@@ -25,14 +24,35 @@ impl Row {
         }
     }
 
+    pub fn recycle(mut self, cell: Cell) -> Self {
+        self.cells.fill(cell);
+        self.wrapped = false;
+        self
+    }
+
     pub fn is_blank(&self) -> bool {
         !self.wrapped && self.cells.iter().all(|c| *c == Cell::default())
     }
 }
 
-pub struct TerminalBuffer {
+struct BufferLayout {
     size: Size,
     pixel_size: Size,
+}
+
+impl BufferLayout {
+    fn new(font_size: Size, graphic_size: Size) -> Self {
+        let width = (graphic_size.0 / font_size.0).max(1);
+        let height = (graphic_size.1 / font_size.1).max(1);
+
+        let size = (width, height);
+        let pixel_size = (font_size.0 * width, font_size.1 * height);
+        Self { size, pixel_size }
+    }
+}
+
+pub struct TerminalBuffer {
+    layout: BufferLayout,
     alt_screen_mode: bool,
     flush_cache: Vec<Vec<Cell>>,
     start_row: usize,
@@ -44,22 +64,22 @@ pub struct TerminalBuffer {
 
 impl TerminalBuffer {
     pub fn width(&self) -> usize {
-        self.size.0
+        self.layout.size.0
     }
 
     pub fn height(&self) -> usize {
-        self.size.1
+        self.layout.size.1
     }
 }
 
-impl Default for TerminalBuffer {
-    fn default() -> Self {
-        let (cols, rows) = INIT_SIZE;
+impl TerminalBuffer {
+    pub fn new(font_size: Size, graphic_size: Size) -> Self {
+        let layout = BufferLayout::new(font_size, graphic_size);
+        let (cols, rows) = layout.size;
         let init_rows = vec![Row::new(cols, Cell::default()); rows];
 
         Self {
-            size: INIT_SIZE,
-            pixel_size: (0, 0),
+            layout,
             alt_screen_mode: false,
             flush_cache: vec![vec![Cell::default(); cols]; rows],
             start_row: 0,
@@ -69,9 +89,7 @@ impl Default for TerminalBuffer {
             alt_buffer: init_rows.into(),
         }
     }
-}
 
-impl TerminalBuffer {
     pub fn swap_alt_screen(&mut self, cell: Cell) {
         self.alt_screen_mode = !self.alt_screen_mode;
         swap(&mut self.buffer, &mut self.alt_buffer);
@@ -175,11 +193,11 @@ impl TerminalBuffer {
         graphic_size: Size,
         cursors: &mut [(usize, usize)],
     ) {
-        let width = (graphic_size.0 / font_size.0).max(1);
-        let height = (graphic_size.1 / font_size.1).max(1);
-        self.pixel_size = (font_size.0 * width, font_size.1 * height);
+        let layout = BufferLayout::new(font_size, graphic_size);
+        let (width, height) = layout.size;
 
-        if self.size == (width, height) {
+        if self.layout.size == (width, height) {
+            self.layout = layout;
             return;
         }
 
@@ -188,7 +206,7 @@ impl TerminalBuffer {
             swap(&mut self.start_row, &mut self.alt_start_row);
         }
 
-        let old_height = self.size.1;
+        let old_height = self.height();
         let buffer_len = self.buffer.len();
 
         let active_cursors = if self.alt_screen_mode {
@@ -257,7 +275,7 @@ impl TerminalBuffer {
             }
         }
 
-        self.size = (width, height);
+        self.layout = layout;
         self.flush_cache = vec![vec![Cell::default(); width]; height];
     }
 }
@@ -310,19 +328,20 @@ impl TerminalBuffer {
         for (i, row) in buffer.enumerate() {
             for (j, &cell) in row.cells.iter().enumerate() {
                 graphic.write(i, j, cell);
+                self.flush_cache[i][j] = cell;
             }
         }
 
         let background = Cell::default().background;
         let rgb = graphic.color_to_rgb(background);
 
-        for y in self.pixel_size.1..graphic.size().1 {
-            for x in 0..self.pixel_size.0 {
+        for y in self.layout.pixel_size.1..graphic.size().1 {
+            for x in 0..self.layout.pixel_size.0 {
                 graphic.draw_pixel(x, y, rgb);
             }
         }
         for y in 0..graphic.size().1 {
-            for x in self.pixel_size.0..graphic.size().0 {
+            for x in self.layout.pixel_size.0..graphic.size().0 {
                 graphic.draw_pixel(x, y, rgb);
             }
         }
@@ -353,53 +372,75 @@ impl TerminalBuffer {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ScrollRegionCtx {
+    top: usize,
+    bottom: usize,
+    start_row: usize,
+}
+
 impl TerminalBuffer {
-    pub fn scroll_region(&mut self, count: isize, cell: Cell, region: Range<usize>) {
-        let (top, bottom) = (region.start, region.end);
-        let start_row = self.buffer.len() - self.height();
+    pub fn scroll_region(
+        &mut self,
+        count: isize,
+        cell: Cell,
+        scroll_region: RangeInclusive<usize>,
+    ) {
+        let region = ScrollRegionCtx {
+            top: *scroll_region.start(),
+            bottom: *scroll_region.end(),
+            start_row: self.buffer.len() - self.height(),
+        };
+        let steps = count.unsigned_abs();
 
         if count > 0 {
-            for _ in 0..count.unsigned_abs() {
-                if !self.alt_screen_mode && top == 0 {
-                    let row = if self.history_size + self.height() == self.buffer.len() {
-                        let mut row = self.buffer.pop_back().unwrap();
-                        row.cells.fill(cell);
-                        row.wrapped = false;
-                        row
-                    } else {
-                        Row::new(self.width(), cell)
-                    };
-                    self.buffer.insert(start_row, row);
-                } else {
-                    let mut row = self.buffer.remove(start_row + bottom).unwrap();
-                    row.cells.fill(cell);
-                    row.wrapped = false;
-                    self.buffer.insert(start_row + top, row);
-                }
+            for _ in 0..steps {
+                self.scroll_down_once(region, cell);
             }
         } else {
-            for _ in 0..count.unsigned_abs() {
-                if !self.alt_screen_mode && bottom == self.height() - 1 {
-                    if self.start_row + self.height() == self.buffer.len() {
-                        self.start_row += 1;
-                    }
-                    let row = if self.history_size + self.height() == self.buffer.len() {
-                        let mut row = self.buffer.pop_front().unwrap();
-                        row.cells.fill(cell);
-                        row.wrapped = false;
-                        self.start_row = self.start_row.saturating_sub(1);
-                        row
-                    } else {
-                        Row::new(self.width(), cell)
-                    };
-                    self.buffer.push_back(row);
-                } else {
-                    let mut row = self.buffer.remove(start_row + top).unwrap();
-                    row.cells.fill(cell);
-                    row.wrapped = false;
-                    self.buffer.insert(start_row + bottom, row);
-                }
+            for _ in 0..steps {
+                self.scroll_up_once(region, cell);
             }
         }
+    }
+
+    fn scroll_down_once(&mut self, region: ScrollRegionCtx, cell: Cell) {
+        if !self.alt_screen_mode && region.top == 0 {
+            let row = if self.history_size + self.height() == self.buffer.len() {
+                self.buffer.pop_back().unwrap().recycle(cell)
+            } else {
+                Row::new(self.width(), cell)
+            };
+            self.buffer.insert(region.start_row, row);
+            return;
+        }
+        let row = self
+            .buffer
+            .remove(region.start_row + region.bottom)
+            .unwrap()
+            .recycle(cell);
+        self.buffer.insert(region.start_row + region.top, row);
+    }
+
+    fn scroll_up_once(&mut self, region: ScrollRegionCtx, cell: Cell) {
+        if !self.alt_screen_mode && region.bottom == self.height() - 1 {
+            if self.start_row + self.height() == self.buffer.len() {
+                self.start_row += 1;
+            }
+            let row = if self.history_size + self.height() == self.buffer.len() {
+                self.start_row = self.start_row.saturating_sub(1);
+                self.buffer.pop_front().unwrap().recycle(cell)
+            } else {
+                Row::new(self.width(), cell)
+            };
+            self.buffer.push_back(row);
+            return;
+        }
+        let row = self
+            .buffer
+            .remove(region.start_row + region.top)
+            .unwrap()
+            .recycle(cell);
+        self.buffer.insert(region.start_row + region.bottom, row);
     }
 }

@@ -1,5 +1,4 @@
 #![no_main]
-
 use arbitrary::Arbitrary;
 use os_terminal::font::{ContentInfo, FontManager, Rasterized};
 use os_terminal::{DrawTarget, KeyboardEvent, Rgb, Terminal};
@@ -16,13 +15,14 @@ enum FuzzOp {
 type Size = (usize, usize);
 
 libfuzzer_sys::fuzz_target!(|ops: Vec<FuzzOp>| {
-    let mut term = Terminal::new(DummyDisplay {
+    let display = DummyDisplay {
         width: 405,
         height: 300,
-    });
+    };
     let (mut font_width, mut font_height) = (8, 16);
+    let font = DummyFont::new(font_width, font_height);
 
-    term.set_font_manager(DummyFont::new(font_width, font_height));
+    let mut term = Terminal::new(display, font);
     term.set_auto_flush(false);
 
     for op in &ops {

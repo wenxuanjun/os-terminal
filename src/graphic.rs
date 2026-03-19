@@ -17,7 +17,7 @@ pub trait DrawTarget {
 pub struct Graphic<D: DrawTarget> {
     display: D,
     pub(crate) color_scheme: ColorScheme,
-    pub(crate) font_manager: Option<Box<dyn FontManager>>,
+    pub(crate) font_manager: Box<dyn FontManager>,
     color_cache: LruCache<(Rgb, Rgb), ColorCache>,
 }
 
@@ -36,11 +36,11 @@ impl<D: DrawTarget> DerefMut for Graphic<D> {
 }
 
 impl<D: DrawTarget> Graphic<D> {
-    pub fn new(display: D) -> Self {
+    pub fn new(display: D, font_manager: Box<dyn FontManager>) -> Self {
         Self {
             display,
             color_scheme: ColorScheme::default(),
-            font_manager: None,
+            font_manager,
             color_cache: LruCache::new(NonZeroUsize::new(128).unwrap()),
         }
     }
@@ -52,17 +52,6 @@ impl<D: DrawTarget> Graphic<D> {
 }
 
 impl<D: DrawTarget> Graphic<D> {
-    pub fn clear(&mut self, cell: Cell) {
-        let (width, height) = self.display.size();
-        let rgb = self.color_to_rgb(cell.background);
-
-        for y in 0..height {
-            for x in 0..width {
-                self.display.draw_pixel(x, y, rgb);
-            }
-        }
-    }
-
     pub fn color_to_rgb(&self, color: Color) -> Rgb {
         match color {
             Color::Spec(rgb) => (rgb.r, rgb.g, rgb.b),
@@ -96,64 +85,63 @@ impl<D: DrawTarget> Graphic<D> {
             foreground = background;
         }
 
-        if let Some(font_manager) = self.font_manager.as_mut() {
-            let (font_width, font_height) = font_manager.size();
-            let (x_start, y_start) = (col * font_width, row * font_height);
+        let font_manager = self.font_manager.as_mut();
+        let (font_width, font_height) = font_manager.size();
+        let (x_start, y_start) = (col * font_width, row * font_height);
 
-            let color_cache = self
-                .color_cache
-                .get_or_insert((foreground, background), || {
-                    ColorCache::new(foreground, background)
-                });
+        let color_cache = self
+            .color_cache
+            .get_or_insert((foreground, background), || {
+                ColorCache::new(foreground, background)
+            });
 
-            let content_info = ContentInfo {
-                content: cell.content,
-                bold: cell.flags.contains(Flags::BOLD),
-                italic: cell.flags.contains(Flags::ITALIC),
-                wide: cell.wide,
+        let content_info = ContentInfo {
+            content: cell.content,
+            bold: cell.flags.contains(Flags::BOLD),
+            italic: cell.flags.contains(Flags::ITALIC),
+            wide: cell.wide,
+        };
+
+        macro_rules! draw_gray_raster {
+            ($raster:ident) => {
+                for (y, line_data) in $raster.iter().enumerate() {
+                    for (x, &alpha) in line_data.iter().enumerate() {
+                        let rgb = color_cache.to_rgb(alpha);
+                        self.display.draw_pixel(x_start + x, y_start + y, rgb);
+                    }
+                }
             };
+        }
 
-            macro_rules! draw_gray_raster {
-                ($raster:ident) => {
-                    for (y, line_data) in $raster.iter().enumerate() {
-                        for (x, &alpha) in line_data.iter().enumerate() {
-                            let rgb = color_cache.to_rgb(alpha);
-                            self.display.draw_pixel(x_start + x, y_start + y, rgb);
-                        }
+        macro_rules! draw_subpixel_raster {
+            ($raster:ident) => {
+                for (y, line_data) in $raster.iter().enumerate() {
+                    for (x, [r, g, b]) in line_data.iter().enumerate() {
+                        let rgb = color_cache.to_subpixel(*r, *g, *b);
+                        self.display.draw_pixel(x_start + x, y_start + y, rgb);
                     }
-                };
-            }
+                }
+            };
+        }
 
-            macro_rules! draw_subpixel_raster {
-                ($raster:ident) => {
-                    for (y, line_data) in $raster.iter().enumerate() {
-                        for (x, [r, g, b]) in line_data.iter().enumerate() {
-                            let rgb = color_cache.to_subpixel(*r, *g, *b);
-                            self.display.draw_pixel(x_start + x, y_start + y, rgb);
-                        }
-                    }
-                };
-            }
+        match font_manager.rasterize(content_info) {
+            Rasterized::GraySlice(raster) => draw_gray_raster!(raster),
+            Rasterized::GrayVec(raster) => draw_gray_raster!(raster),
+            Rasterized::SubpixelVec(raster) => draw_subpixel_raster!(raster),
+        }
 
-            match font_manager.rasterize(content_info) {
-                Rasterized::GraySlice(raster) => draw_gray_raster!(raster),
-                Rasterized::GrayVec(raster) => draw_gray_raster!(raster),
-                Rasterized::SubpixelVec(raster) => draw_subpixel_raster!(raster),
-            }
+        if cell.flags.contains(Flags::CURSOR_BEAM) {
+            let rgb = color_cache.to_rgb(255);
+            (0..font_height).for_each(|y| self.display.draw_pixel(x_start, y_start + y, rgb));
+        }
 
-            if cell.flags.contains(Flags::CURSOR_BEAM) {
-                let rgb = color_cache.to_rgb(255);
-                (0..font_height).for_each(|y| self.display.draw_pixel(x_start, y_start + y, rgb));
-            }
-
-            if cell
-                .flags
-                .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
-            {
-                let rgb = color_cache.to_rgb(255);
-                let y_base = y_start + font_height - 1;
-                (0..font_width).for_each(|x| self.display.draw_pixel(x_start + x, y_base, rgb));
-            }
+        if cell
+            .flags
+            .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
+        {
+            let rgb = color_cache.to_rgb(255);
+            let y_base = y_start + font_height - 1;
+            (0..font_width).for_each(|x| self.display.draw_pixel(x_start + x, y_base, rgb));
         }
     }
 }

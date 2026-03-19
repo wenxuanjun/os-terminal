@@ -26,7 +26,7 @@ This screenshot shows the result of running `fastfetch` in the example terminal.
 
 Create a display wrapper to wrap your framebuffer and implement the `DrawTarget` trait for it.
 
-```rust
+```rust,ignore
 use alloc::boxed::Box;
 use os_terminal::{DrawTarget, Rgb, Terminal};
 use os_terminal::font::BitmapFont;
@@ -52,9 +52,10 @@ impl DrawTarget for Display {
 
 Then you can create a terminal with a box-wrapped font manager and write some text to it.
 
-```rust
-let mut terminal = Terminal::new(display);
-terminal.set_font_manager(Box::new(BitmapFont));
+```rust,ignore
+use core::fmt::Write as _;
+
+let mut terminal = Terminal::new(display, Box::new(BitmapFont));
 
 terminal.process(b"\x1b[31mHello, world!\x1b[0m");
 terminal.write_fmt(format_args!("{} + {} = {}", 1, 2, 3));
@@ -68,7 +69,7 @@ Now you can redirect the keyboard events to the terminal in scancode format (cur
 
 `handle_keyboard` returns `Option<KeyboardEvent>` for events that need to be handled by the caller, such as font size changes:
 
-```rust
+```rust,ignore
 use os_terminal::KeyboardEvent;
 
 // LCtrl pressed, C pressed, C released, LCtrl released
@@ -88,7 +89,7 @@ Unlike keyboard, you need to pass in the `MouseInput` enumeration specified by `
 
 For example, you can pass in a mouse scroll event like this:
 
-```rust
+```rust,ignore
 use os_terminal::MouseInput;
 
 terminal.handle_mouse(MouseInput::Scroll(lines));
@@ -100,33 +101,33 @@ You can use `terminal.set_scroll_speed(speed)` to set a positive mouse scroll sp
 
 The default enabled `BitmapFont` is based on the pre-rendered noto sans mono font, and does not support setting the font size, suitable for simple usage scenarios where you don't want to pass in a font file.
 
-To use truetype font, enable `truetype` feature and create a `TrueTypeFont` instance from a font file with size.
+To use truetype font, create a `TrueTypeFont` instance from a font file with size. WOFF2 input additionally requires the `woff2` feature.
 
-```rust
+```rust,ignore
 let font_buffer = include_bytes!("SourceCodeVF.otf");
-terminal.set_font_manager(Box::new(TrueTypeFont::new(10.0, font_buffer)));
+let mut terminal = Terminal::new(display, Box::new(TrueTypeFont::new(10.0, font_buffer)));
 ```
 
 If the font is a variable font, it uses the `wght` axis. If not, the library automatically synthesizes bold glyphs by thickening the outline. And you can optionally provide a separate italic font file. If not provided, the library automatically synthesizes italics by skewing the glyphs. You can enable subpixel rendering to improve text clarity on LCD screens.
 
 This means you can use a single standard `.ttf` file and still get Bold, Italic, and Bold-Italic styles, saving valuable flash storage.
 
-```rust
+```rust,ignore
 let font_buffer = include_bytes!("FiraCode.ttf");
-// Optional: Use real italic font
-let italic_buffer = include_bytes!("FiraCode-Italic.ttf"); 
+// Optional: use a real italic font.
+let italic_buffer = include_bytes!("FiraCode-Italic.ttf");
 
 let font_manager = TrueTypeFont::new(10.0, font_buffer)
     .with_italic_font(italic_buffer)
     .with_subpixel(true);
-terminal.set_font_manager(Box::new(font_manager));
+let mut terminal = Terminal::new(display, Box::new(font_manager));
 ```
 
 ### Logger
 
 If you want to get the logs from the terminal, you can set a logger that receives `fmt::Arguments`.
 
-```rust
+```rust,ignore
 terminal.set_logger(|args| println!("Terminal: {:?}", args));
 ```
 
@@ -134,7 +135,7 @@ terminal.set_logger(|args| println!("Terminal: {:?}", args));
 
 Default flush strategy is synchronous. If you need higher performance, you can disable the auto flush and flush manually when needed.
 
-```rust
+```rust,ignore
 terminal.set_auto_flush(false);
 terminal.flush();
 ```
@@ -145,14 +146,14 @@ The terminal comes with 8 built-in themes. You can switch to other themes manual
 
 Custom theme is also supported:
 
-```rust
+```rust,ignore
 let palette = Palette {
     foreground: ...,
     background: ...,
     ansi_colors: [...],
-}
+};
 
-terminal.set_custom_color_scheme(palette);
+terminal.set_custom_color_scheme(&palette);
 ```
 
 Note that your setting is temporary because your palette will be overwritten if you switch to another theme.
@@ -161,7 +162,7 @@ Note that your setting is temporary because your palette will be overwritten if 
 
 To enable clipboard support (Copy/Paste), you need to implement the `ClipboardHandler` trait and register it.
 
-```rust
+```rust,ignore
 struct Clipboard;
 
 impl ClipboardHandler for Clipboard {
@@ -188,7 +189,7 @@ Default history size is `200` lines. You can change it by calling `terminal.set_
 
 And color cache size and `TrueTypeFont` rasterize cache size is also configurable.
 
-```rust
+```rust,ignore
 // Set the size of the color cache (default: 128)
 terminal.set_color_cache_size(4096);
 
@@ -209,13 +210,14 @@ With `handle_keyboard`, some shortcuts are supported:
 - `Ctrl + Shift + F1-F8`: Switch to different built-in themes
 - `Ctrl + Shift + ArrowUp/ArrowDown`: Scroll up/down history
 - `Ctrl + Shift + PageUp/PageDown`: Scroll up/down history by page
-- `Ctrl + Shift + C`: Copy (Requires `ClipboardHandler`)
-- `Ctrl + Shift + V`: Paste (Requires `ClipboardHandler`)
+- `Ctrl + Shift + C`: Copy (requires `ClipboardHandler`)
+- `Ctrl + Shift + V`: Paste (requires `ClipboardHandler`)
 
-## Features
+## Cargo Features
 
-- `bitmap`: Enable embedded noto sans mono bitmap font support. This feature is enabled by default.
-- `truetype`: Enable truetype font support. This feature is disabled by default.
+- `bitmap`: Enable embedded noto sans mono bitmap font support. Enabled by default.
+- `truetype`: Enable truetype font support. Enabled by default.
+- `woff2`: Enable WOFF2 font decoding for `TrueTypeFont`. Enabled by default.
 
 ## Acknowledgement
 
