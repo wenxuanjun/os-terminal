@@ -303,6 +303,8 @@ impl TerminalBuffer {
     where
         D: DrawTarget,
     {
+        graphic.prepare_frame();
+
         let start = self.start_row;
         let end = self.start_row + self.height();
         let buffer = self.buffer.range_mut(start..end);
@@ -321,6 +323,8 @@ impl TerminalBuffer {
     where
         D: DrawTarget,
     {
+        graphic.prepare_frame();
+
         let start = self.start_row;
         let end = self.start_row + self.height();
         let buffer = self.buffer.range_mut(start..end);
@@ -337,12 +341,14 @@ impl TerminalBuffer {
 
         for y in self.layout.pixel_size.1..graphic.size().1 {
             for x in 0..self.layout.pixel_size.0 {
-                graphic.draw_pixel(x, y, rgb);
+                let background_pixel = graphic.background_pixel(x, y, rgb);
+                graphic.draw_pixel(x, y, background_pixel);
             }
         }
         for y in 0..graphic.size().1 {
             for x in self.layout.pixel_size.0..graphic.size().0 {
-                graphic.draw_pixel(x, y, rgb);
+                let background_pixel = graphic.background_pixel(x, y, rgb);
+                graphic.draw_pixel(x, y, background_pixel);
             }
         }
     }

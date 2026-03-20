@@ -158,6 +158,23 @@ terminal.set_custom_color_scheme(&palette);
 
 Note that your setting is temporary because your palette will be overwritten if you switch to another theme.
 
+### Wallpaper
+
+Enable the `wallpaper` feature, load a PNG with `include_bytes!`, and pass the byte slice to `terminal.set_wallpaper(...)` to render it behind cells that still use the default terminal background color.
+
+```rust,ignore
+let wallpaper = include_bytes!("wallpaper.png");
+terminal.set_wallpaper(wallpaper).unwrap();
+```
+
+There is also a minimal runnable example in `examples/wallpaper.rs`:
+
+```bash
+cargo run --example wallpaper --features wallpaper
+```
+
+If you need to remove it later, call `terminal.clear_wallpaper()`.
+
 ### Clipboard
 
 To enable clipboard support (Copy/Paste), you need to implement the `ClipboardHandler` trait and register it.
@@ -217,6 +234,7 @@ With `handle_keyboard`, some shortcuts are supported:
 
 - `bitmap`: Enable embedded noto sans mono bitmap font support. Enabled by default.
 - `truetype`: Enable truetype font support. Enabled by default.
+- `wallpaper`: Enable PNG wallpaper decoding via `terminal.set_wallpaper`.
 - `woff2`: Enable WOFF2 font decoding for `TrueTypeFont`. Enabled by default.
 
 ## Acknowledgement

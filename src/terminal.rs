@@ -21,6 +21,8 @@ use crate::graphic::{DrawTarget, Graphic};
 use crate::keyboard::{KeyboardEvent, KeyboardManager};
 use crate::mouse::{MouseEvent, MouseInput, MouseManager};
 use crate::palette::Palette;
+#[cfg(feature = "wallpaper")]
+use crate::wallpaper::WallpaperError;
 
 pub trait ClipboardHandler {
     fn get_text(&mut self) -> Option<String>;
@@ -269,6 +271,19 @@ impl<D: DrawTarget> Terminal<D> {
     pub fn set_font_manager(&mut self, font_manager: Box<dyn FontManager>) {
         self.inner.graphic.font_manager = font_manager;
         self.inner.apply_layout_change();
+    }
+
+    #[cfg(feature = "wallpaper")]
+    pub fn set_wallpaper(&mut self, png_data: &[u8]) -> Result<(), WallpaperError> {
+        self.inner.graphic.set_wallpaper(png_data)?;
+        self.inner.buffer.full_flush(&mut self.inner.graphic);
+        Ok(())
+    }
+
+    #[cfg(feature = "wallpaper")]
+    pub fn clear_wallpaper(&mut self) {
+        self.inner.graphic.clear_wallpaper();
+        self.inner.buffer.full_flush(&mut self.inner.graphic);
     }
 }
 
@@ -981,5 +996,90 @@ impl<D: DrawTarget> Handler for TerminalInner<D> {
 
     fn pop_keyboard_modes(&mut self, to_pop: u16) {
         log!(self, "Unhandled pop keyboard modes: {}", to_pop);
+    }
+}
+
+#[cfg(all(test, feature = "wallpaper"))]
+mod tests {
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::cell::RefCell;
+
+    use super::Terminal;
+    use crate::color::Rgb;
+    use crate::font::{ContentInfo, FontManager, Rasterized};
+    use crate::graphic::DrawTarget;
+
+    const EMPTY_RASTER_ROW: [u8; 1] = [0];
+    const EMPTY_RASTER: [&[u8]; 1] = [&EMPTY_RASTER_ROW];
+
+    const RED_PIXEL_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    struct TestFont;
+
+    impl FontManager for TestFont {
+        fn size(&self) -> (usize, usize) {
+            (1, 1)
+        }
+
+        fn rasterize(&mut self, _: ContentInfo) -> Rasterized<'_> {
+            Rasterized::GraySlice(&EMPTY_RASTER)
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestDisplay {
+        pixels: Rc<RefCell<Vec<Rgb>>>,
+    }
+
+    impl DrawTarget for TestDisplay {
+        fn size(&self) -> (usize, usize) {
+            (1, 1)
+        }
+
+        fn draw_pixel(&mut self, x: usize, y: usize, rgb: Rgb) {
+            self.pixels.borrow_mut()[y + x] = rgb;
+        }
+    }
+
+    #[test]
+    fn wallpaper_replaces_default_background() {
+        let pixels = Rc::new(RefCell::new(vec![(0, 0, 0)]));
+        let mut terminal = Terminal::new(
+            TestDisplay {
+                pixels: pixels.clone(),
+            },
+            Box::new(TestFont),
+        );
+
+        terminal.process(b"\x1b[?25l");
+        terminal.set_wallpaper(RED_PIXEL_PNG).unwrap();
+
+        assert_eq!(pixels.borrow()[0], (255, 0, 0));
+    }
+
+    #[test]
+    fn explicit_background_keeps_solid_color() {
+        let pixels = Rc::new(RefCell::new(vec![(0, 0, 0)]));
+        let mut terminal = Terminal::new(
+            TestDisplay {
+                pixels: pixels.clone(),
+            },
+            Box::new(TestFont),
+        );
+
+        terminal.process(b"\x1b[?25l");
+        terminal.set_wallpaper(RED_PIXEL_PNG).unwrap();
+        terminal.process(b"\x1b[48;2;0;0;255m \x1b[0m");
+
+        assert_eq!(pixels.borrow()[0], (0, 0, 255));
     }
 }

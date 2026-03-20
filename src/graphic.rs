@@ -3,11 +3,13 @@ use core::mem::swap;
 use core::num::NonZeroUsize;
 use core::ops::{Deref, DerefMut};
 use lru::LruCache;
-use vte::ansi::Color;
+use vte::ansi::{Color, NamedColor};
 
 use crate::cell::{Cell, Flags};
 use crate::color::{ColorScheme, Rgb};
 use crate::font::{ContentInfo, FontManager, Rasterized};
+#[cfg(feature = "wallpaper")]
+use crate::wallpaper::{Wallpaper, WallpaperError};
 
 pub trait DrawTarget {
     fn size(&self) -> (usize, usize);
@@ -19,6 +21,8 @@ pub struct Graphic<D: DrawTarget> {
     pub(crate) color_scheme: ColorScheme,
     pub(crate) font_manager: Box<dyn FontManager>,
     color_cache: LruCache<(Rgb, Rgb), ColorCache>,
+    #[cfg(feature = "wallpaper")]
+    wallpaper: Option<Wallpaper>,
 }
 
 impl<D: DrawTarget> Deref for Graphic<D> {
@@ -42,12 +46,26 @@ impl<D: DrawTarget> Graphic<D> {
             color_scheme: ColorScheme::default(),
             font_manager,
             color_cache: LruCache::new(NonZeroUsize::new(128).unwrap()),
+            #[cfg(feature = "wallpaper")]
+            wallpaper: None,
         }
     }
 
     pub fn set_cache_size(&mut self, size: usize) {
         assert!(size > 0, "Cache size must be greater than 0");
         self.color_cache.resize(NonZeroUsize::new(size).unwrap());
+    }
+
+    #[cfg(feature = "wallpaper")]
+    pub fn set_wallpaper(&mut self, png_data: &[u8]) -> Result<(), WallpaperError> {
+        let wallpaper = Wallpaper::decode(png_data, self.size())?;
+        self.wallpaper = Some(wallpaper);
+        Ok(())
+    }
+
+    #[cfg(feature = "wallpaper")]
+    pub fn clear_wallpaper(&mut self) {
+        self.wallpaper = None;
     }
 }
 
@@ -69,31 +87,68 @@ impl<D: DrawTarget> Graphic<D> {
 }
 
 impl<D: DrawTarget> Graphic<D> {
+    fn has_wallpaper(&self) -> bool {
+        #[cfg(feature = "wallpaper")]
+        {
+            return self.wallpaper.is_some();
+        }
+
+        #[cfg(not(feature = "wallpaper"))]
+        {
+            false
+        }
+    }
+
+    pub fn prepare_frame(&mut self) {
+        #[cfg(feature = "wallpaper")]
+        if let Some(wallpaper) = self.wallpaper.as_mut() {
+            let display_size = self.display.size();
+            wallpaper.ensure_scaled(display_size);
+        }
+    }
+
+    pub(crate) fn background_pixel(&self, _x: usize, _y: usize, fallback: Rgb) -> Rgb {
+        #[cfg(feature = "wallpaper")]
+        {
+            if let Some(wallpaper) = self.wallpaper.as_ref() {
+                return wallpaper.sample(_x, _y, fallback);
+            }
+        }
+
+        fallback
+    }
+}
+
+impl<D: DrawTarget> Graphic<D> {
     pub fn write(&mut self, row: usize, col: usize, cell: Cell) {
         if cell.placeholder {
             return;
         }
 
-        let mut foreground = self.color_to_rgb(cell.foreground);
-        let mut background = self.color_to_rgb(cell.background);
+        let mut foreground_color = cell.foreground;
+        let mut background_color = cell.background;
 
         if cell.flags.intersects(Flags::INVERSE | Flags::CURSOR_BLOCK) {
-            swap(&mut foreground, &mut background);
+            swap(&mut foreground_color, &mut background_color);
         }
 
-        if cell.flags.contains(Flags::HIDDEN) {
+        let mut foreground = self.color_to_rgb(foreground_color);
+        let background = self.color_to_rgb(background_color);
+        let use_wallpaper = self.has_wallpaper()
+            && matches!(background_color, Color::Named(NamedColor::Background));
+        let hidden = cell.flags.contains(Flags::HIDDEN);
+
+        if hidden && !use_wallpaper {
             foreground = background;
         }
 
+        #[cfg(feature = "wallpaper")]
+        let wallpaper = self.wallpaper.as_ref();
+        let display = &mut self.display;
+        let color_cache = &mut self.color_cache;
         let font_manager = self.font_manager.as_mut();
         let (font_width, font_height) = font_manager.size();
         let (x_start, y_start) = (col * font_width, row * font_height);
-
-        let color_cache = self
-            .color_cache
-            .get_or_insert((foreground, background), || {
-                ColorCache::new(foreground, background)
-            });
 
         let content_info = ContentInfo {
             content: cell.content,
@@ -104,10 +159,32 @@ impl<D: DrawTarget> Graphic<D> {
 
         macro_rules! draw_gray_raster {
             ($raster:ident) => {
-                for (y, line_data) in $raster.iter().enumerate() {
-                    for (x, &alpha) in line_data.iter().enumerate() {
-                        let rgb = color_cache.to_rgb(alpha);
-                        self.display.draw_pixel(x_start + x, y_start + y, rgb);
+                if use_wallpaper {
+                    #[cfg(feature = "wallpaper")]
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, &alpha) in line_data.iter().enumerate() {
+                            let background_pixel =
+                                wallpaper
+                                    .unwrap()
+                                    .sample(x_start + x, y_start + y, background);
+                            let rgb = if hidden {
+                                background_pixel
+                            } else {
+                                blend_rgb(foreground, background_pixel, alpha)
+                            };
+                            display.draw_pixel(x_start + x, y_start + y, rgb);
+                        }
+                    }
+                } else {
+                    let color_cache = color_cache.get_or_insert((foreground, background), || {
+                        ColorCache::new(foreground, background)
+                    });
+
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, &alpha) in line_data.iter().enumerate() {
+                            let rgb = color_cache.to_rgb(alpha);
+                            display.draw_pixel(x_start + x, y_start + y, rgb);
+                        }
                     }
                 }
             };
@@ -115,10 +192,36 @@ impl<D: DrawTarget> Graphic<D> {
 
         macro_rules! draw_subpixel_raster {
             ($raster:ident) => {
-                for (y, line_data) in $raster.iter().enumerate() {
-                    for (x, [r, g, b]) in line_data.iter().enumerate() {
-                        let rgb = color_cache.to_subpixel(*r, *g, *b);
-                        self.display.draw_pixel(x_start + x, y_start + y, rgb);
+                if use_wallpaper {
+                    #[cfg(feature = "wallpaper")]
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, [r, g, b]) in line_data.iter().enumerate() {
+                            let background_pixel =
+                                wallpaper
+                                    .unwrap()
+                                    .sample(x_start + x, y_start + y, background);
+                            let rgb = if hidden {
+                                background_pixel
+                            } else {
+                                (
+                                    blend_channel(foreground.0, background_pixel.0, *r),
+                                    blend_channel(foreground.1, background_pixel.1, *g),
+                                    blend_channel(foreground.2, background_pixel.2, *b),
+                                )
+                            };
+                            display.draw_pixel(x_start + x, y_start + y, rgb);
+                        }
+                    }
+                } else {
+                    let color_cache = color_cache.get_or_insert((foreground, background), || {
+                        ColorCache::new(foreground, background)
+                    });
+
+                    for (y, line_data) in $raster.iter().enumerate() {
+                        for (x, [r, g, b]) in line_data.iter().enumerate() {
+                            let rgb = color_cache.to_subpixel(*r, *g, *b);
+                            display.draw_pixel(x_start + x, y_start + y, rgb);
+                        }
                     }
                 }
             };
@@ -131,19 +234,35 @@ impl<D: DrawTarget> Graphic<D> {
         }
 
         if cell.flags.contains(Flags::CURSOR_BEAM) {
-            let rgb = color_cache.to_rgb(255);
-            (0..font_height).for_each(|y| self.display.draw_pixel(x_start, y_start + y, rgb));
+            let rgb = foreground;
+            (0..font_height).for_each(|y| display.draw_pixel(x_start, y_start + y, rgb));
         }
 
         if cell
             .flags
             .intersects(Flags::UNDERLINE | Flags::CURSOR_UNDERLINE)
         {
-            let rgb = color_cache.to_rgb(255);
+            let rgb = foreground;
             let y_base = y_start + font_height - 1;
-            (0..font_width).for_each(|x| self.display.draw_pixel(x_start + x, y_base, rgb));
+            (0..font_width).for_each(|x| display.draw_pixel(x_start + x, y_base, rgb));
         }
     }
+}
+
+#[cfg(feature = "wallpaper")]
+fn blend_rgb(foreground: Rgb, background: Rgb, alpha: u8) -> Rgb {
+    (
+        blend_channel(foreground.0, background.0, alpha),
+        blend_channel(foreground.1, background.1, alpha),
+        blend_channel(foreground.2, background.2, alpha),
+    )
+}
+
+#[cfg(feature = "wallpaper")]
+fn blend_channel(foreground: u8, background: u8, alpha: u8) -> u8 {
+    let alpha = alpha as u16;
+    let background_alpha = 255 - alpha;
+    (((foreground as u16 * alpha) + (background as u16 * background_alpha) + 127) / 255) as u8
 }
 
 struct ColorCache {

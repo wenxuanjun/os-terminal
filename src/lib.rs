@@ -13,6 +13,8 @@ mod keyboard;
 mod mouse;
 mod palette;
 mod terminal;
+#[cfg(feature = "wallpaper")]
+mod wallpaper;
 
 pub mod font;
 
@@ -22,3 +24,5 @@ pub use keyboard::KeyboardEvent;
 pub use mouse::{MouseButton, MouseInput};
 pub use palette::Palette;
 pub use terminal::{ClipboardHandler, Terminal};
+#[cfg(feature = "wallpaper")]
+pub use wallpaper::WallpaperError;

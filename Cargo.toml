@@ -16,6 +16,10 @@ rust-version = "1.81.0"
 name = "terminal"
 required-features = ["truetype"]
 
+[[example]]
+name = "wallpaper"
+required-features = ["wallpaper"]
+
 [profile.release]
 lto = true
 opt-level = 3
@@ -26,6 +30,7 @@ codegen-units = 1
 default = ["bitmap"]
 bitmap = ["dep:noto-sans-mono-bitmap"]
 truetype = ["dep:swash"]
+wallpaper = ["dep:zune-png"]
 woff2 = ["dep:woff2"]
 
 [dependencies]
@@ -53,6 +58,11 @@ features = ["render", "libm"]
 package = "woff2-no-std"
 version = "0.3.4"
 optional = true
+
+[dependencies.zune-png]
+version = "0.5.1"
+optional = true
+default-features = false
 
 [dependencies.noto-sans-mono-bitmap]
 version = "0.3.2"
