@@ -1,24 +1,25 @@
+use std::env;
 use std::error::Error;
-use std::ffi::CString;
 use std::num::NonZeroU32;
 use std::os::fd::{AsFd, OwnedFd};
-use std::os::unix::io::{AsRawFd, IntoRawFd};
+use std::os::unix::process::CommandExt;
+use std::process::{self, Command};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, process};
 
 use keycode::{KeyMap, KeyMapping};
-use nix::errno::Errno;
-use nix::libc::{ioctl, TIOCSWINSZ};
-use nix::pty::{openpty, OpenptyResult, Winsize};
-use nix::unistd::{close, execvp, fork, read, write, ForkResult};
-use nix::unistd::{dup2_stderr, dup2_stdin, dup2_stdout, setsid};
-use os_terminal::font::TrueTypeFont;
+use os_terminal::font::SwashFont;
 use os_terminal::KeyboardEvent;
 use os_terminal::{ClipboardHandler, DrawTarget, MouseInput, Rgb, Terminal};
+use rustix::io::{read, write, Errno};
+use rustix::process::setsid;
+use rustix::runtime::{kernel_fork, Fork};
+use rustix::stdio::{dup2_stderr, dup2_stdin, dup2_stdout};
+use rustix::termios::{tcsetwinsize, Winsize};
+use rustix_openpty::{openpty, Pty};
 
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
@@ -51,23 +52,27 @@ impl ClipboardHandler for Clipboard {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let OpenptyResult { master, slave } = openpty(None, None)?;
+    let Pty {
+        controller, user, ..
+    } = openpty(None, None)?;
 
-    match unsafe { fork() } {
-        Ok(ForkResult::Child) => {
-            close(master.into_raw_fd())?;
+    match unsafe { kernel_fork() } {
+        Ok(Fork::Child(_)) => {
+            drop(controller);
 
             setsid()?;
-            dup2_stdin(slave.as_fd())?;
-            dup2_stdout(slave.as_fd())?;
-            dup2_stderr(slave.as_fd())?;
+            dup2_stdin(user.as_fd())?;
+            dup2_stdout(user.as_fd())?;
+            dup2_stderr(user.as_fd())?;
 
             let shell = env::var("SHELL").unwrap_or("bash".into());
-            let _ = execvp::<CString>(&CString::new(shell)?, &[]);
+            let error = Command::new(shell).exec();
+            eprintln!("Exec failed: {error}");
+            process::exit(1);
         }
-        Ok(ForkResult::Parent { .. }) => {
-            close(slave.into_raw_fd())?;
-            run_app(master)?;
+        Ok(Fork::ParentOf(_)) => {
+            drop(user);
+            run_app(controller)?;
         }
         Err(_) => eprintln!("Fork failed"),
     }
@@ -82,7 +87,7 @@ fn run_app(master: OwnedFd) -> Result<(), Box<dyn Error>> {
 
     let mut terminal = Terminal::new(
         display,
-        Box::new(TrueTypeFont::new(10.0, FONT_DATA).with_subpixel(true)),
+        Box::new(SwashFont::new(10.0, FONT_DATA).with_subpixel(true)),
     );
     terminal.set_auto_flush(false);
     terminal.set_scroll_speed(5);
@@ -105,7 +110,7 @@ fn run_app(master: OwnedFd) -> Result<(), Box<dyn Error>> {
         buffer.clone(),
         terminal.clone(),
         pending_draw.clone(),
-        master.as_raw_fd(),
+        master.try_clone()?,
     );
 
     let master_clone = master.try_clone()?;
@@ -118,7 +123,7 @@ fn run_app(master: OwnedFd) -> Result<(), Box<dyn Error>> {
                     pending_draw.store(true, Ordering::Relaxed);
                 }
                 Ok(_) => break,
-                Err(Errno::EIO) => process::exit(0),
+                Err(Errno::IO) => process::exit(0),
                 Err(e) => {
                     eprintln!("Error reading from PTY: {:?}", e);
                     process::exit(1)
@@ -168,13 +173,13 @@ impl DrawTarget for Display {
 }
 
 struct PtyController {
-    fd: i32,
+    fd: OwnedFd,
     rows: u16,
     cols: u16,
 }
 
 impl PtyController {
-    fn new(fd: i32) -> Self {
+    fn new(fd: OwnedFd) -> Self {
         Self {
             fd,
             rows: 0,
@@ -192,7 +197,7 @@ impl PtyController {
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             };
-            unsafe { ioctl(self.fd, TIOCSWINSZ, &win_size) };
+            let _ = tcsetwinsize(&self.fd, win_size);
         }
     }
 }
@@ -215,13 +220,13 @@ impl App {
         buffer: Arc<Vec<AtomicU32>>,
         terminal: Arc<Mutex<Terminal<Display>>>,
         pending_draw: Arc<AtomicBool>,
-        master_fd: i32,
+        controller: OwnedFd,
     ) -> Self {
         let mut app = Self {
             ansi_sender,
             buffer,
             terminal,
-            pty: PtyController::new(master_fd),
+            pty: PtyController::new(controller),
             window: None,
             surface: None,
             pending_draw,
@@ -237,7 +242,7 @@ impl App {
     }
 
     fn apply_font_change(&self, term: &mut Terminal<Display>) {
-        let font = TrueTypeFont::new(self.font_size, FONT_DATA);
+        let font = SwashFont::new(self.font_size, FONT_DATA);
         term.set_font_manager(Box::new(font.with_subpixel(true)));
     }
 

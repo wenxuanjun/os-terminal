@@ -126,6 +126,7 @@ impl<D: DrawTarget> Graphic<D> {
 
         match font_manager.rasterize(content_info) {
             Rasterized::GraySlice(raster) => draw_gray_raster!(raster),
+            Rasterized::Vec(raster) => draw_gray_raster!(raster),
             Rasterized::GrayVec(raster) => draw_gray_raster!(raster),
             Rasterized::SubpixelVec(raster) => draw_subpixel_raster!(raster),
         }

@@ -1,17 +1,22 @@
 use alloc::vec::Vec;
 
+#[cfg(feature = "ab_glyph")]
+mod ab_glyph;
 #[cfg(feature = "bitmap")]
 mod bitmap;
-#[cfg(feature = "truetype")]
-mod truetype;
+#[cfg(feature = "swash")]
+mod swash;
 
+#[cfg(feature = "ab_glyph")]
+pub use ab_glyph::AbGlyphFont;
 #[cfg(feature = "bitmap")]
 pub use bitmap::BitmapFont;
-#[cfg(feature = "truetype")]
-pub use truetype::TrueTypeFont;
+#[cfg(feature = "swash")]
+pub use swash::SwashFont;
 
 pub enum Rasterized<'a> {
     GraySlice(&'a [&'a [u8]]),
+    Vec(&'a Vec<Vec<u8>>),
     GrayVec(&'a Vec<Vec<u8>>),
     SubpixelVec(&'a Vec<Vec<[u8; 3]>>),
 }

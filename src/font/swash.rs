@@ -48,7 +48,7 @@ impl FontData {
     }
 }
 
-pub struct TrueTypeFont {
+pub struct SwashFont {
     font: FontData,
     italic_font: Option<FontData>,
     subpixel: bool,
@@ -60,7 +60,7 @@ pub struct TrueTypeFont {
     bitmap_cache: LruCache<ContentInfo, RasterBuffer>,
 }
 
-impl TrueTypeFont {
+impl SwashFont {
     pub fn new(font_size: f32, font_bytes: &'static [u8]) -> Self {
         let font = FontData::from_bytes(font_bytes);
         let font_size = font_size * 96.0 / 72.0;
@@ -97,7 +97,7 @@ impl TrueTypeFont {
     }
 }
 
-impl FontManager for TrueTypeFont {
+impl FontManager for SwashFont {
     fn size(&self) -> (usize, usize) {
         (self.raster_width, self.raster_height)
     }

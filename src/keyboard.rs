@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 use pc_keyboard::layouts::Us104Key;
 use pc_keyboard::KeyCode::{self, *};
-use pc_keyboard::{DecodedKey, Keyboard};
+use pc_keyboard::{DecodedKey, PS2Keyboard};
 use pc_keyboard::{HandleControl, ScancodeSet1};
 
 #[derive(Debug)]
@@ -18,7 +18,7 @@ pub enum KeyboardEvent {
 pub struct KeyboardManager {
     pub(crate) app_cursor_mode: bool,
     pub(crate) crnl_mapping: bool,
-    keyboard: Keyboard<Us104Key, ScancodeSet1>,
+    keyboard: PS2Keyboard<Us104Key, ScancodeSet1>,
 }
 
 impl Default for KeyboardManager {
@@ -26,7 +26,7 @@ impl Default for KeyboardManager {
         Self {
             app_cursor_mode: false,
             crnl_mapping: false,
-            keyboard: Keyboard::new(
+            keyboard: PS2Keyboard::new(
                 ScancodeSet1::new(),
                 Us104Key,
                 HandleControl::MapLettersToUnicode,

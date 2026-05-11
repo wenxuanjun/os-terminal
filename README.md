@@ -8,7 +8,7 @@ The environment should have initialized `global_allocator` since `alloc` crate i
 
 ![](screenshot.png)
 
-This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --release --example terminal --features=truetype,woff2` (Unix only).
+This screenshot shows the result of running `fastfetch` in the example terminal. You can try it by running `cargo run --release --example terminal --features=swash,woff2` (Unix only).
 
 ## Features
 
@@ -101,14 +101,21 @@ You can use `terminal.set_scroll_speed(speed)` to set a positive mouse scroll sp
 
 The default enabled `BitmapFont` is based on the pre-rendered noto sans mono font, and does not support setting the font size, suitable for simple usage scenarios where you don't want to pass in a font file.
 
-To use truetype font, create a `TrueTypeFont` instance from a font file with size. WOFF2 input additionally requires the `woff2` feature.
+To use vector fonts, create either an `AbGlyphFont` or `SwashFont` instance from a font file with size. `AbGlyphFont` is the smaller TTF/OTF backend. `SwashFont` provides higher quality rendering and supports WOFF2 input with the `woff2` feature.
 
 ```rust,ignore
 let font_buffer = include_bytes!("SourceCodeVF.otf");
-let mut terminal = Terminal::new(display, Box::new(TrueTypeFont::new(10.0, font_buffer)));
+let mut terminal = Terminal::new(display, Box::new(AbGlyphFont::new(10.0, font_buffer)));
 ```
 
-If the font is a variable font, it uses the `wght` axis. If not, the library automatically synthesizes bold glyphs by thickening the outline. And you can optionally provide a separate italic font file. If not provided, the library automatically synthesizes italics by skewing the glyphs. You can enable subpixel rendering to improve text clarity on LCD screens.
+If you want the higher quality backend, use `SwashFont` instead:
+
+```rust,ignore
+let font_buffer = include_bytes!("FiraCodeNotoSans.woff2");
+let mut terminal = Terminal::new(display, Box::new(SwashFont::new(10.0, font_buffer)));
+```
+
+If the font is a variable font, it uses the `wght` axis. If not, the library automatically synthesizes bold glyphs by thickening the outline. And you can optionally provide a separate italic font file. If not provided, the library automatically synthesizes italics by skewing the glyphs. `SwashFont` also supports subpixel rendering to improve text clarity on LCD screens.
 
 This means you can use a single standard `.ttf` file and still get Bold, Italic, and Bold-Italic styles, saving valuable flash storage.
 
@@ -117,7 +124,7 @@ let font_buffer = include_bytes!("FiraCode.ttf");
 // Optional: use a real italic font.
 let italic_buffer = include_bytes!("FiraCode-Italic.ttf");
 
-let font_manager = TrueTypeFont::new(10.0, font_buffer)
+let font_manager = SwashFont::new(10.0, font_buffer)
     .with_italic_font(italic_buffer)
     .with_subpixel(true);
 let mut terminal = Terminal::new(display, Box::new(font_manager));
@@ -187,15 +194,15 @@ Once configured, the following shortcuts are enabled:
 
 Default history size is `200` lines. You can change it by calling `terminal.set_history_size(size)`.
 
-And color cache size and `TrueTypeFont` rasterize cache size is also configurable.
+And color cache size and vector font raster cache size are also configurable.
 
 ```rust,ignore
 // Set the size of the color cache (default: 128)
 terminal.set_color_cache_size(4096);
 
 // Set the size of the font raster cache (default: 512)
-// Only available when using TrueTypeFont
-let font = TrueTypeFont::new(10.0, font_buffer).with_cache_size(1024);
+// Available for both AbGlyphFont and SwashFont
+let font = AbGlyphFont::new(10.0, font_buffer).with_cache_size(1024);
 ```
 
 Moreover, you can use `terminal.set_bell_handler(handler)` to set the bell handler so that when you type `unicode(7)` such as `Ctrl + G`, the terminal will call the handler to play the bell.
@@ -216,8 +223,9 @@ With `handle_keyboard`, some shortcuts are supported:
 ## Cargo Features
 
 - `bitmap`: Enable embedded noto sans mono bitmap font support. Enabled by default.
-- `truetype`: Enable truetype font support. Enabled by default.
-- `woff2`: Enable WOFF2 font decoding for `TrueTypeFont`. Enabled by default.
+- `ab_glyph`: Enable the smaller TTF backend based on `ab_glyph`.
+- `swash`: Enable the higher quality TTF backend based on `swash`.
+- `woff2`: Enable WOFF2 decoding support for `SwashFont`.
 
 ## Acknowledgement
 

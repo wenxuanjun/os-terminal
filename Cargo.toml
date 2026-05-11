@@ -1,6 +1,6 @@
 [package]
 name = "os-terminal"
-version = "0.7.3"
+version = "0.7.4"
 edition = "2021"
 authors = ["Xuanjun Wen <wenxuanjun@yahoo.com>"]
 description = "Beautiful terminal emulator on no-std environment"
@@ -14,7 +14,7 @@ rust-version = "1.81.0"
 
 [[example]]
 name = "terminal"
-required-features = ["truetype"]
+required-features = ["swash", "woff2"]
 
 [profile.release]
 lto = true
@@ -23,15 +23,16 @@ panic = "abort"
 codegen-units = 1
 
 [features]
-default = ["bitmap"]
+default = ["bitmap", "ab_glyph", "woff2"]
 bitmap = ["dep:noto-sans-mono-bitmap"]
-truetype = ["dep:swash"]
+ab_glyph = ["dep:ab_glyph"]
+swash = ["dep:swash"]
 woff2 = ["dep:woff2"]
 
 [dependencies]
-bitflags = "2.11.0"
-lru = "0.16.3"
-pc-keyboard = "0.8.0"
+bitflags = "2.11.1"
+lru = "0.18.0"
+pc-keyboard = "0.9.0"
 unicode-width = "0.2.2"
 
 [dependencies.vte]
@@ -43,8 +44,14 @@ default-features = false
 version = "1.8.3"
 features = ["alloc"]
 
+[dependencies.ab_glyph]
+version = "0.2.32"
+features = ["libm", "variable-fonts"]
+optional = true
+default-features = false
+
 [dependencies.swash]
-version = "0.2.6"
+version = "0.2.7"
 default-features = false
 optional = true
 features = ["render", "libm"]
@@ -68,15 +75,16 @@ default-features = false
 
 [dev-dependencies]
 keycode = "1.0.0"
+rustix-openpty = "0.2.0"
 
 [dev-dependencies.arboard]
 version = "3.6.1"
 features = ["wayland-data-control"]
 default-features = false
 
-[dev-dependencies.nix]
-version = "0.31.2"
-features = ["term", "process", "fs"]
+[dev-dependencies.rustix]
+version = "1.1.4"
+features = ["process", "runtime", "stdio", "termios"]
 
 [dev-dependencies.winit]
 version = "0.30.13"
